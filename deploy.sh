@@ -7,13 +7,15 @@ set -euo pipefail
 PI="${1:-admin@192.168.4.28}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-ssh "$PI" 'mkdir -p ~/voice ~/hailo-live ~/hailo_test ~/yolo_test/scenes'
-scp "$HERE"/voice/assistant.py "$HERE"/voice/listen.py        "$PI":~/voice/
+ssh "$PI" 'mkdir -p ~/voice ~/web ~/hailo-live ~/hailo_test ~/yolo_test/scenes'
+scp "$HERE"/voice/*.py                                         "$PI":~/voice/
+scp "$HERE"/web/app.py "$HERE"/web/index.html                  "$PI":~/web/
 scp "$HERE"/hailo-live/*                                       "$PI":~/hailo-live/
 scp "$HERE"/hailo-test/classify.sh                             "$PI":~/hailo_test/
 scp "$HERE"/hailo-test/compare.sh                              "$PI":~/yolo_test/
 scp "$HERE"/pi-config/asoundrc                                 "$PI":~/.asoundrc
 scp "$HERE"/pi-config/hailo-ollama.service                     "$PI":~/hailo-ollama.service
+scp "$HERE"/pi-config/pi-web.service                           "$PI":~/pi-web.service
 scp "$HERE"/README.md                                          "$PI":~/README.md
 ssh "$PI" 'chmod +x ~/voice/*.py ~/hailo-live/run_live.sh ~/hailo_test/classify.sh ~/yolo_test/compare.sh'
 echo "deployed to $PI"

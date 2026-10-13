@@ -11,11 +11,15 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 |---|---|---|
 | `voice/assistant.py` | `~/voice/` | Voice → LLM → voice assistant (Vosk + hailo-ollama + Piper) |
 | `voice/listen.py` | `~/voice/` | The original fixed-command Vosk listener (lights on/off etc., placeholder actions) |
+| `voice/stt_fix.py` | `~/voice/` | Vocabulary corrections applied to every transcript ("pie"→"pi", "i had"→"ai hat", …) |
+| `voice/stt_bench.py` | `~/voice/` | Measures word error rate and speed of Vosk models on a WAV test set |
 | `hailo-live/` | `~/hailo-live/` | Live YOLO11m on the camera with a browser viewer |
 | `hailo-test/classify.sh` | `~/hailo_test/` | ResNet-50 classification of one image on the Hailo |
 | `hailo-test/compare.sh` | `~/yolo_test/` | YOLOv8m vs YOLO11m side-by-side on a folder of images |
 | `pi-config/asoundrc` | `~/.asoundrc` | Defines the `usbmic` ALSA device |
 | `pi-config/hailo-ollama.service` | `/etc/systemd/system/` **(sudo)** | Runs the LLM server at boot |
+| `web/app.py`, `web/index.html` | `~/web/` | Web front end on port 8002: chat, speak, hold-to-talk, live transcript, camera |
+| `pi-config/pi-web.service` | `/etc/systemd/system/` **(sudo)** | Runs the web front end at boot |
 | `deploy.sh` | — | Copies all of the above to the Pi (everything except the sudo step) |
 
 ## Hardware
@@ -135,12 +139,35 @@ Speak a question; it transcribes with Vosk, asks `qwen2.5-instruct:1.5b` on the 
 
 Options:
 
+- `--confirm` say "I heard: …" before answering, so a mis-heard question is obvious
+- `--stt-model small|big|DIR` speech model (default `small`; see "Speech recognition accuracy" below)
+- `--no-fix` turn off the vocabulary corrections in `stt_fix.py`
 - `--text` type questions instead of speaking (same prompt, history and speech)
 - `--no-tts` print only
 - `--wav file.wav` feed a 16 kHz mono 16-bit WAV instead of the mic
 - `--wake "hey pi"` only answer utterances that start with the phrase
 - `--model qwen2.5-coder:1.5b` use another pulled model (switching models costs ~10 s on the Hailo; only one is loaded at a time)
 - `--out pw|hdmi|usb|DEVICE` where to play: `pw` (default) uses PipeWire's current default sink; `hdmi` / `usb` force that output through `aplay`; anything else is an ALSA device name
+
+### Web front end
+
+**http://192.168.4.28:8002/** from any device on the network. It runs as the systemd service `pi-web` (installed and verified on Oct 13, 2026; starts at boot after `hailo-ollama`). Manage with `sudo systemctl {status,restart,stop} pi-web`; logs via `journalctl -u pi-web -n 50`. To install it on a fresh Pi (**sudo**):
+
+```
+ssh -t admin@192.168.4.28 'sudo cp ~/pi-web.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pi-web'
+```
+
+If you ever start it by hand instead (`~/voice/.venv/bin/python ~/web/app.py`), stop that copy before enabling the service: two instances cannot share port 8002, and the service will crash-loop with "Address already in use" until the hand-started one is gone (`pkill -f "^/home/admin/voice/.venv/bin/python app.py"`). After editing `web/app.py`, run `./deploy.sh` and then `sudo systemctl restart pi-web`.
+
+What the page does (all against the same pieces the voice assistant uses):
+
+- **Chat**: type a question, the reply streams in from `hailo-ollama` with the same short-answer prompt and 4-turn history as `assistant.py`. A model picker lists what's pulled. "New conversation" clears the history.
+- **Speak replies on the Pi**: when checked, each sentence is spoken through the Pi's audio output (Piper, PipeWire default sink) in order while the text keeps streaming. Set `ASSISTANT_OUT=hdmi|usb|<alsa device>` in the service file to force an output.
+- **Hold to talk**: records on the laptop/phone, sends the audio to the Pi, transcribes it with Vosk (small model) plus `stt_fix.py`, and asks the question. **Browsers only allow mic access on HTTPS or `localhost`**, so over plain `http://192.168.4.28:8002` the button will report "mic not available" in Chrome/Safari. Workarounds: open `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add `http://192.168.4.28:8002`; or run the page over HTTPS with a self-signed certificate (not set up yet). Typing and the Pi's own USB mic are unaffected.
+- **Voice assistant transcript**: live `HEARD:` / `ANSWER:` lines from `assistant.py` (it appends each to `~/voice/transcript.jsonl`; the page follows that file). Lets a room see what the mic understood.
+- **Camera**: shows the latest YOLO frame while `~/hailo-live/run_live.sh` is running (it checks the frame is under 5 s old).
+
+Endpoints, for students who want to build on it: `POST /api/chat` (NDJSON stream), `POST /api/transcribe` (audio body → `{text, raw}`), `POST /api/speak`, `POST /api/reset`, `GET /api/transcript` (server-sent events), `GET /api/camera`, `GET /api/status`. Needs `flask` in the voice venv (`~/voice/.venv/bin/pip install flask`) and `ffmpeg` (already on the Pi). Ports in use on the Pi: 8000 `hailo-ollama`, 8001 live camera viewer, 8002 this page.
 
 ### Live object detection (YOLO11m on the camera)
 
@@ -157,6 +184,30 @@ Open `http://192.168.4.28:8001/viewer.html` from any machine on the network. `ca
 ~/yolo_test/compare.sh                                                  # YOLOv8m vs YOLO11m on ~/yolo_test/scenes/*.jpg -> out/<model>/
 hailortcli run2 --measure-overall-latency set-net /usr/share/hailo-models/resnet_v1_50_h10.hef   # latency benchmark
 ```
+
+## Speech recognition accuracy
+
+Free-form recognition is the weak link: the original `listen.py` only had to pick one of five phrases, while `assistant.py` must transcribe anything. Measured on Oct 13, 2026 with `voice/stt_bench.py` on a test set of 10 questions × 6 macOS voices (60 WAVs, 390 words; synthetic voices, so real students will differ):
+
+| Model | Disk | Load | WER | Exact | Speed on Pi 5 |
+|---|---|---|---|---|---|
+| `vosk-model-small-en-us-0.15` (default) | 68 MB | 1 s | 11.3% | 39/60 | 2.4× real time |
+| `vosk-model-en-us-0.22-lgraph` | 205 MB | 1 s | 17.9% | 31/60 | 0.4× (too slow for live use) |
+| `vosk-model-en-us-0.22` | 2.7 GB | 10–40 s | 10.0% | 43/60 | 2.0× real time |
+| **small + `stt_fix.py`** | 68 MB | 1 s | **6.9%** | **45/60** | 2.4× real time |
+| big + `stt_fix.py` | 2.7 GB | 10–40 s | 6.9% | 47/60 | 2.0× real time |
+
+What the errors were: almost all on this project's own words, which general English models don't know: "pi"→"pie", "AI HAT"→"i had / all you had", "three"→"free", "sensors"→"senses". So the fix with the best return is **`voice/stt_fix.py`**: a short list of regex corrections for exactly the mistakes seen in testing, applied to every transcript (`--no-fix` disables it). Students can add their topic's words there. The system prompt also tells the LLM the text came from speech recognition, and `--confirm` reads back what was heard.
+
+The big model is installed at `~/voice/models/vosk-model-en-us-0.22` (`--stt-model big`) but gives no accuracy gain once the corrections are on, and in one run its 2.7 GB load pushed the LLM's first response from 0.5 s to 32 s. Delete it with `rm -r ~/voice/models/vosk-model-en-us-0.22` to free the space if you don't need it. The lgraph model is at `~/voice/models/vosk-model-en-us-0.22-lgraph` and can be deleted too.
+
+Re-run the measurement after changing models or `stt_fix.py` (the test set lives in `~/voice/sttset/`; regenerate it on the Mac with `say -v <voice> -o f.aiff "<text>" && afconvert -f WAVE -d LEI16@16000 -c 1 f.aiff f.wav`, one `file.wav|transcript` line per file in `manifest.txt`):
+
+```
+~/voice/.venv/bin/python ~/voice/stt_bench.py --fix ~/voice/sttset/manifest.txt ~/voice/model ~/voice/models/vosk-model-en-us-0.22
+```
+
+**Before a demo, test with real voices in the real room**: run `assistant.py --confirm --no-tts`, have a few students ask questions, and add any repeated mis-hearings to `stt_fix.py`. Whisper (used by the Moonlighter guide) is the alternative if Vosk stays too inaccurate; it is more accurate but not streaming, so it would change the interaction.
 
 ## Testing without a mic or speaker
 

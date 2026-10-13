@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi Assistant</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e6e8ee; --muted:#8b93a7; --me:#2b4c7e; --bot:#243126; --accent:#4f8cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, sans-serif; }
+  header { display:flex; align-items:center; gap:1rem; padding:.7rem 1rem; border-bottom:1px solid var(--line); }
+  header h1 { font-size:1.05rem; margin:0; }
+  header .status { color:var(--muted); font-size:.85rem; margin-left:auto; }
+  main { display:grid; grid-template-columns: 1fr 360px; gap:1rem; padding:1rem; height:calc(100vh - 52px); }
+  @media (max-width:900px) { main { grid-template-columns:1fr; height:auto; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; display:flex; flex-direction:column; min-height:0; }
+  .panel h2 { font-size:.8rem; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:0; padding:.6rem .9rem; border-bottom:1px solid var(--line); }
+  #log { flex:1; overflow-y:auto; padding:.9rem; display:flex; flex-direction:column; gap:.6rem; }
+  .msg { max-width:85%; padding:.55rem .8rem; border-radius:10px; white-space:pre-wrap; }
+  .msg.me { align-self:flex-end; background:var(--me); }
+  .msg.bot { align-self:flex-start; background:var(--bot); }
+  .msg .meta { display:block; color:var(--muted); font-size:.75rem; margin-top:.3rem; }
+  form { display:flex; gap:.5rem; padding:.7rem; border-top:1px solid var(--line); }
+  input[type=text] { flex:1; padding:.6rem .7rem; border-radius:8px; border:1px solid var(--line); background:#0f1115; color:var(--text); font-size:1rem; }
+  button { padding:.6rem .9rem; border-radius:8px; border:1px solid var(--line); background:#222733; color:var(--text); cursor:pointer; font-size:.95rem; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  #talk.rec { background:#b3261e; border-color:#b3261e; color:#fff; }
+  .opts { display:flex; gap:1rem; align-items:center; padding:.4rem .9rem .7rem; color:var(--muted); font-size:.85rem; flex-wrap:wrap; }
+  .side { display:flex; flex-direction:column; gap:1rem; min-height:0; }
+  #transcript { flex:1; overflow-y:auto; padding:.6rem .9rem; font-size:.85rem; }
+  #transcript div { padding:.2rem 0; border-bottom:1px dashed var(--line); }
+  #transcript .heard { color:#9ecbff; }
+  #transcript .answer { color:#b8e0b8; }
+  #cam { width:100%; display:none; border-radius:0 0 10px 10px; }
+  #camnote { padding:.6rem .9rem; color:var(--muted); font-size:.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pi Assistant</h1>
+  <span class="status" id="status">connecting…</span>
+</header>
+<main>
+  <section class="panel">
+    <h2>Chat with the LLM on the AI HAT+ 2</h2>
+    <div id="log"></div>
+    <div class="opts">
+      <label><input type="checkbox" id="speak"> speak replies on the Pi</label>
+      <label>model <select id="model"></select></label>
+      <button id="reset" type="button">new conversation</button>
+    </div>
+    <form id="form">
+      <input type="text" id="q" placeholder="Ask a question…" autocomplete="off" autofocus>
+      <button id="talk" type="button" title="Hold to talk">🎤 hold to talk</button>
+      <button class="primary" id="send" type="submit">Send</button>
+    </form>
+  </section>
+  <aside class="side">
+    <section class="panel" style="flex:1">
+      <h2>Voice assistant transcript</h2>
+      <div id="transcript"><div style="color:var(--muted)">Waiting for assistant.py to hear something…</div></div>
+    </section>
+    <section class="panel">
+      <h2>Camera (live YOLO)</h2>
+      <img id="cam" alt="live camera">
+      <div id="camnote">Start <code>~/hailo-live/run_live.sh</code> on the Pi to see detections here.</div>
+    </section>
+  </aside>
+</main>
+<script>
+const log = document.getElementById('log');
+const q = document.getElementById('q');
+const form = document.getElementById('form');
+const sendBtn = document.getElementById('send');
+const talkBtn = document.getElementById('talk');
+const speakBox = document.getElementById('speak');
+const modelSel = document.getElementById('model');
+const statusEl = document.getElementById('status');
+
+function add(role, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+
+async function ask(text) {
+  if (!text) return;
+  add('me', text);
+  q.value = '';
+  sendBtn.disabled = true;
+  const bot = add('bot', '');
+  try {
+    const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, speak: speakBox.checked, model: modelSel.value }) });
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const m = JSON.parse(line);
+        if (m.t) { bot.textContent += m.t; log.scrollTop = log.scrollHeight; }
+        if (m.error) { bot.textContent += '\n[' + m.error + ']'; }
+        if (m.done) { const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = m.seconds + ' s'; bot.appendChild(meta); }
+      }
+    }
+  } catch (e) {
+    bot.textContent += '\n[request failed: ' + e + ']';
+  } finally {
+    sendBtn.disabled = false;
+    q.focus();
+  }
+}
+
+form.addEventListener('submit', e => { e.preventDefault(); ask(q.value.trim()); });
+document.getElementById('reset').addEventListener('click', async () => {
+  await fetch('/api/reset', { method: 'POST' });
+  log.innerHTML = '';
+});
+
+// Hold-to-talk: record in the browser, transcribe on the Pi, then send.
+let recorder = null, chunks = [];
+async function startRec() {
+  if (recorder) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream);
+    chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType });
+      recorder = null;
+      talkBtn.classList.remove('rec'); talkBtn.textContent = '🎤 hold to talk';
+      if (blob.size < 1000) return;
+      statusEl.textContent = 'transcribing…';
+      const r = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob });
+      const j = await r.json();
+      statusEl.textContent = j.text ? ('heard: ' + j.text + (j.raw && j.raw !== j.text ? '  (raw: ' + j.raw + ')' : '')) : ('nothing recognized' + (j.error ? ': ' + j.error : ''));
+      if (j.text) ask(j.text);
+    };
+    recorder.start();
+    talkBtn.classList.add('rec'); talkBtn.textContent = '● recording… release to send';
+  } catch (e) {
+    statusEl.textContent = 'mic not available: ' + e.message + ' (browsers need https or localhost for the mic)';
+  }
+}
+function stopRec() { if (recorder && recorder.state === 'recording') recorder.stop(); }
+talkBtn.addEventListener('mousedown', startRec);
+talkBtn.addEventListener('touchstart', e => { e.preventDefault(); startRec(); });
+['mouseup', 'mouseleave'].forEach(ev => talkBtn.addEventListener(ev, stopRec));
+talkBtn.addEventListener('touchend', e => { e.preventDefault(); stopRec(); });
+
+// Live transcript from the voice assistant (server-sent events).
+const tr = document.getElementById('transcript');
+const es = new EventSource('/api/transcript');
+let trFirst = true;
+es.onmessage = ev => {
+  if (trFirst) { tr.innerHTML = ''; trFirst = false; }
+  const m = JSON.parse(ev.data);
+  const d = document.createElement('div');
+  d.className = m.kind;
+  d.textContent = (m.kind === 'heard' ? 'HEARD: ' : 'ANSWER: ') + m.text;
+  tr.appendChild(d);
+  tr.scrollTop = tr.scrollHeight;
+};
+
+// Camera frame, refreshed while the live pipeline is running.
+const cam = document.getElementById('cam'), camnote = document.getElementById('camnote');
+async function pollCam() {
+  const r = await fetch('/api/camera?t=' + Date.now(), { cache: 'no-store' });
+  if (r.ok) { cam.src = URL.createObjectURL(await r.blob()); cam.style.display = 'block'; camnote.style.display = 'none'; setTimeout(pollCam, 150); }
+  else { cam.style.display = 'none'; camnote.style.display = 'block'; setTimeout(pollCam, 3000); }
+}
+pollCam();
+
+// Status + model list.
+(async () => {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    modelSel.innerHTML = '';
+    (s.llm_models.length ? s.llm_models : [s.default_model]).forEach(m => {
+      const o = document.createElement('option'); o.value = m; o.textContent = m; if (m === s.default_model) o.selected = true; modelSel.appendChild(o);
+    });
+    statusEl.textContent = s.llm_models.length ? 'LLM ready (' + s.llm_models.length + ' models)' : 'LLM server not reachable';
+  } catch (e) { statusEl.textContent = 'status unavailable'; }
+})();
+</script>
+</body>
+</html>

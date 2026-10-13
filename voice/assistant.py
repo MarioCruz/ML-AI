@@ -27,6 +27,7 @@ Say "stop listening" to quit.
 """
 import argparse
 import json
+import os
 import queue
 import re
 import subprocess
@@ -38,8 +39,18 @@ import wave
 import requests
 from vosk import KaldiRecognizer, Model, SetLogLevel
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stt_fix  # noqa: E402  (vocabulary corrections for this project's words)
+
 RATE = 16000
-MODEL_DIR = "/home/admin/voice/model"
+# Speech-to-text models. On our 60-utterance test set (stt_bench.py), with the
+# stt_fix corrections both score 6.9% word error rate; without them the small
+# model is 11.3% and the big one 10.0%. The big model (2.7 GB on disk) takes
+# 10-40 s to load and slowed the LLM's first response, so small is the default.
+STT_MODELS = {
+    "small": "/home/admin/voice/model",
+    "big": "/home/admin/voice/models/vosk-model-en-us-0.22",
+}
 DEVICE = "usbmic"
 LLM_URL = "http://127.0.0.1:8000/api/chat"
 DEFAULT_MODEL = "qwen2.5-instruct:1.5b"
@@ -47,13 +58,27 @@ PIPER_VOICE = "/home/admin/voice/piper/en_US-lessac-medium.onnx"
 HISTORY_TURNS = 4  # user+assistant pairs kept as context
 
 # Short answers: the Hailo runs ~7 tokens/s, so long replies feel slow.
+# The transcript hint helps the model read through speech-recognition errors.
 SYSTEM_PROMPT = (
     "You are a friendly voice assistant running on a Raspberry Pi. "
-    "Answer in one or two short sentences. Do not use lists or markdown."
+    "Answer in one or two short sentences. Do not use lists or markdown. "
+    "The user's words come from speech recognition and may contain mis-heard "
+    "words; answer the most likely intended question."
 )
 
 STOP_PHRASES = {"stop listening", "stop", "goodbye"}
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# Every heard question and answer is appended here as one JSON line, so the
+# web page (web/app.py) can show a live transcript of the voice assistant.
+TRANSCRIPT_LOG = "/home/admin/voice/transcript.jsonl"
+
+
+def log_event(kind, text):
+    try:
+        with open(TRANSCRIPT_LOG, "a") as f:
+            f.write(json.dumps({"ts": time.time(), "kind": kind, "text": text}) + "\n")
+    except OSError:
+        pass
 
 
 def resolve_alsa_device(name):
@@ -185,6 +210,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--wav", help="read audio from this 16 kHz mono WAV instead of the mic")
     ap.add_argument("--text", action="store_true", help="type questions on the keyboard instead of using the mic")
+    ap.add_argument("--stt-model", default="small", help='speech model: "small" (default), "big", or a Vosk model directory')
+    ap.add_argument("--confirm", action="store_true", help='say "I heard: ..." before answering, so mis-hearings are obvious')
+    ap.add_argument("--no-fix", action="store_true", help="disable the vocabulary corrections in stt_fix.py")
     ap.add_argument("--wake", default="", help="wake phrase that must start each request")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--no-tts", action="store_true", help="print replies only, do not speak")
@@ -217,7 +245,12 @@ def main():
         return
 
     SetLogLevel(-1)
-    rec = KaldiRecognizer(Model(MODEL_DIR), RATE)  # free-form, no grammar
+    model_dir = STT_MODELS.get(args.stt_model, args.stt_model)
+    if not os.path.isdir(model_dir):
+        print(f"Speech model not found at {model_dir}, falling back to the small model.", flush=True)
+        model_dir = STT_MODELS["small"]
+    print(f"Loading speech model {model_dir} ...", flush=True)
+    rec = KaldiRecognizer(Model(model_dir), RATE)  # free-form, no grammar
 
     q = queue.Queue()
     threading.Thread(target=mic_reader, args=(q, speaker, args.wav), daemon=True).start()
@@ -237,7 +270,11 @@ def main():
         else:
             continue
 
-        print(f"HEARD: {text}", flush=True)
+        raw = text
+        if not args.no_fix:
+            text = stt_fix.fix(text)
+        print(f"HEARD: {text}" + (f"   (raw: {raw})" if text != raw else ""), flush=True)
+        log_event("heard", text)
         if text in STOP_PHRASES:
             speaker.speak("Goodbye.")
             break
@@ -247,12 +284,15 @@ def main():
             text = text[len(wake):].strip()
             if not text:
                 continue
+        if args.confirm:
+            speaker.speak(f"I heard: {text}.")
         try:
             answer = ask_llm(args.model, history, text, speaker)
         except requests.RequestException as e:
             print(f"LLM error: {e}", flush=True)
             speaker.speak("Sorry, I could not reach the language model.")
             continue
+        log_event("answer", answer)
         history += [{"role": "user", "content": text}, {"role": "assistant", "content": answer}]
         history = history[-2 * HISTORY_TURNS:]
         if data is None:
