@@ -15,7 +15,7 @@ Usage:
   ~/voice/.venv/bin/python ~/voice/assistant.py --wav q.wav  # feed a 16 kHz mono WAV instead
   ~/voice/.venv/bin/python ~/voice/assistant.py --text       # type questions instead of speaking
   options: --wake "hey pi"     only answer utterances that start with this phrase
-           --model NAME        hailo-ollama model (default qwen2.5-instruct:1.5b)
+           --model NAME        hailo-ollama model (default qwen2.5:1.5b)
            --no-tts            print only, do not speak
            --out pw|hdmi|usb|DEVICE
                                "pw" (default) plays via pw-play to PipeWire's default sink
@@ -53,7 +53,7 @@ STT_MODELS = {
 }
 DEVICE = "usbmic"
 LLM_URL = "http://127.0.0.1:8000/api/chat"
-DEFAULT_MODEL = "qwen2.5-instruct:1.5b"
+DEFAULT_MODEL = "qwen2.5:1.5b"
 PIPER_VOICE = "/home/admin/voice/piper/en_US-lessac-medium.onnx"
 HISTORY_TURNS = 4  # user+assistant pairs kept as context
 

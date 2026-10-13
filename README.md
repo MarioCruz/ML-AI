@@ -56,10 +56,20 @@ Verify after the reboot:
 ```
 lspci | grep -i hailo                 # Hailo-10H at 0001:01:00.0
 ls -l /dev/hailo0
-hailortcli fw-control identify        # Firmware 5.1.1, Device Architecture: HAILO10H
+hailortcli fw-control identify        # Firmware 5.2.0, Device Architecture: HAILO10H
 ```
 
-This pulls in `h10-hailort`, `h10-hailort-pcie-driver`, `python3-h10-hailort`, `hailo-tappas-core` 5.1.0, `hailo-models` 1.0.0 (the `.hef` files in `/usr/share/hailo-models/`), and `rpicam-apps-hailo-postprocess`. Installed versions: HailoRT 5.1.1.
+A fresh install from the Raspberry Pi repo (checked Oct 12, 2026) gives HailoRT 5.1.1. It pulls in `h10-hailort`, `h10-hailort-pcie-driver`, `python3-h10-hailort`, `hailo-tappas-core` 5.1.0, `hailo-models` 1.0.0 (the `.hef` files in `/usr/share/hailo-models/`), and `rpicam-apps-hailo-postprocess`. Step 2b upgrades it to 5.2.0, which is what this Pi runs now.
+
+### 2b. Upgrade to HailoRT 5.2.0 (sudo, optional)
+
+Download the three packages from Hailo's server (the same server as the 5.1.1 zoo `.deb`, see step 6) into `~/hailo520/` on the Pi: `hailort_5.2.0_arm64.deb`, `hailort-pcie-driver_5.2.0_all.deb`, `hailo_gen_ai_model_zoo_5.2.0_arm64.deb`. Install all three together, or the driver and runtime versions will not match (`HAILO_INVALID_DRIVER_VERSION`):
+
+```
+ssh -t admin@192.168.4.28 'sudo dpkg -i ~/hailo520/hailort_5.2.0_arm64.deb ~/hailo520/hailort-pcie-driver_5.2.0_all.deb ~/hailo520/hailo_gen_ai_model_zoo_5.2.0_arm64.deb && sudo reboot'   # (sudo)
+```
+
+Before upgrading, save the package list so you can roll back: `dpkg -l 'h10*' 'hailo*' > ~/hailo-rollback-5.1.1.txt`. The zoo install replaces `/usr/share/hailo-ollama`, so the models must be pulled again afterwards (step 6). Verify `hailortcli fw-control identify` shows firmware 5.2.0.
 
 ### 3. Camera
 
@@ -96,12 +106,14 @@ mkdir -p ~/voice/piper && cd ~/voice/piper && ~/voice/.venv/bin/python -m piper.
 
 ### 6. LLM server on the Hailo (sudo for two steps)
 
-`hailo-ollama` is Hailo's Ollama-compatible server. It runs curated HEF LLMs on the Hailo-10H's own 8 GB. Stock Ollama is CPU-only and is not used. Package version must match HailoRT (5.1.1). Source: the [official Raspberry Pi AI docs](https://www.raspberrypi.com/documentation/computers/ai.html).
+`hailo-ollama` is Hailo's Ollama-compatible server. It runs curated HEF LLMs on the Hailo-10H's own 8 GB. Stock Ollama is CPU-only and is not used. Package version must match HailoRT (5.2.0 on this Pi; the 5.1.1 zoo package goes with 5.1.1). Source: the [official Raspberry Pi AI docs](https://www.raspberrypi.com/documentation/computers/ai.html).
 
 ```
-cd ~ && wget https://dev-public.hailo.ai/2025_12/Hailo10/hailo_gen_ai_model_zoo_5.1.1_arm64.deb   # 7.9 MB
-ssh -t admin@192.168.4.28 'sudo dpkg -i ~/hailo_gen_ai_model_zoo_5.1.1_arm64.deb'                   # (sudo)
+cd ~ && wget https://dev-public.hailo.ai/2025_12/Hailo10/hailo_gen_ai_model_zoo_5.2.0_arm64.deb   # check the directory name on Hailo's server if this 404s
+ssh -t admin@192.168.4.28 'sudo dpkg -i ~/hailo_gen_ai_model_zoo_5.2.0_arm64.deb'                   # (sudo)
 ```
+
+If you are on 5.1.1, use `hailo_gen_ai_model_zoo_5.1.1_arm64.deb` (7.9 MB) instead. If you did step 2b, the zoo package is already installed, so skip this step.
 
 Install the service (unit file comes from `pi-config/hailo-ollama.service` via `deploy.sh`; it runs as `admin`, restarts on failure, working directory `/home/admin`):
 
@@ -109,17 +121,27 @@ Install the service (unit file comes from `pi-config/hailo-ollama.service` via `
 ssh -t admin@192.168.4.28 'sudo cp ~/hailo-ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now hailo-ollama'   # (sudo)
 ```
 
-Pull the models (about 1.5–2 MB/s here, so 15–20 minutes each):
+Pull the models (about 1.5–2 MB/s here, so 15–20 minutes each). Pull them again after any zoo package install, because that replaces the model store:
 
 ```
-curl -s http://127.0.0.1:8000/hailo/v1/list        # zoo: qwen2.5-instruct:1.5b, qwen2.5-coder:1.5b, qwen2:1.5b, llama3.2:3b, deepseek_r1_distill_qwen:1.5b
-for m in qwen2.5-instruct:1.5b qwen2.5-coder:1.5b; do
+curl -s http://127.0.0.1:8000/hailo/v1/list        # zoo (5.2.0): qwen2.5:1.5b, qwen2.5-coder:1.5b, qwen2:1.5b, llama3.2:1b, deepseek_r1:1.5b
+for m in qwen2.5:1.5b qwen2.5-coder:1.5b; do
   curl -s http://127.0.0.1:8000/api/pull -H 'Content-Type: application/json' -d "{\"model\": \"$m\", \"stream\": true}" | tail -c 200; echo
 done
 curl -s http://127.0.0.1:8000/api/tags             # shows what is pulled
 ```
 
-Models land in `/usr/share/hailo-ollama/models/blob/` (instruct 2.25 GB, coder 1.67 GB, both Q4_0). Config is `/etc/xdg/hailo-ollama/hailo-ollama.json`; it binds `0.0.0.0:8000`, so the API is reachable from the LAN. Change `host` to `127.0.0.1` to keep it Pi-only.
+Models land in `/usr/share/hailo-ollama/models/blob/` (both models together about 3.8 GB on 5.2.0). Config is `/etc/xdg/hailo-ollama/hailo-ollama.json`; it binds `0.0.0.0:8000`, so the API is reachable from the LAN. Change `host` to `127.0.0.1` to keep it Pi-only.
+
+### 6b. Larger CMA memory pool (sudo, optional)
+
+Hailo's driver uses a contiguous memory pool (CMA). The default is 64 MB. On this Pi it was raised to 256 MB by adding `cma=256M` to the kernel command line, which takes effect after a reboot. Nothing failed at 64 MB; this was an experiment to see whether it helps the LLM speed (result in "CPU vs Hailo" below).
+
+```
+ssh -t admin@192.168.4.28 'sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak && sudo sed -i "s/$/ cma=256M/" /boot/firmware/cmdline.txt && sudo reboot'   # (sudo)
+```
+
+Check after the reboot: `grep CmaTotal /proc/meminfo` should show `262144 kB`. To undo, copy the `.bak` file back and reboot.
 
 ### 7. Copy the scripts
 
@@ -137,7 +159,7 @@ From the Mac, in this repo:
 ~/voice/.venv/bin/python ~/voice/assistant.py
 ```
 
-Speak a question; it transcribes with Vosk, asks `qwen2.5-instruct:1.5b` on the Hailo (short-answer system prompt, last 4 turns kept as context), streams the reply, and speaks each sentence with Piper as it completes (first word about 0.5 s after you stop talking). Mic input is dropped while it speaks. Say "stop listening" to quit.
+Speak a question; it transcribes with Vosk, asks `qwen2.5:1.5b` on the Hailo (short-answer system prompt, last 4 turns kept as context), streams the reply, and speaks each sentence with Piper as it completes (first word about 0.5 s after you stop talking). Mic input is dropped while it speaks. Say "stop listening" to quit.
 
 Options:
 
@@ -191,7 +213,7 @@ hailortcli run2 --measure-overall-latency set-net /usr/share/hailo-models/resnet
 
 ## CPU vs Hailo for the LLM
 
-Prompted by [this article](https://the-diy-life.com/i-ran-ai-on-a-raspberry-pi-the-results-were-unexpected/) (Pi 5 CPU ~11 tok/s, Hailo slower), measured here on Oct 13, 2026 with `voice/llm_bench.py`: the same Qwen2.5 1.5B model as a GGUF on the Pi's CPU (stock Ollama 0.40.3, `qwen2.5:1.5b`, 986 MB) and as Hailo's HEF on the AI HAT+ 2 (`hailo-ollama`, `qwen2.5-instruct:1.5b`, 2.25 GB). Temperature 0, seed 42, "hello" warm-up, the article's three prompts, 3 runs each, CPU sampled during generation.
+Prompted by [this article](https://the-diy-life.com/i-ran-ai-on-a-raspberry-pi-the-results-were-unexpected/) (Pi 5 CPU ~11 tok/s, Hailo slower), measured here on Oct 13, 2026 with `voice/llm_bench.py`: the same Qwen2.5 1.5B model as a GGUF on the Pi's CPU (stock Ollama 0.40.3, `qwen2.5:1.5b`, 986 MB) and as Hailo's HEF on the AI HAT+ 2 (`hailo-ollama`, `qwen2.5-instruct:1.5b`, 2.25 GB). Temperature 0, seed 42, "hello" warm-up, the article's three prompts, 3 runs each, CPU sampled during generation. The table below is that run on HailoRT 5.1.1. Reruns on 5.2.0 are in the next section.
 
 | backend | prompt | tok/s | wall | CPU during generation |
 |---|---|---|---|---|
@@ -203,6 +225,8 @@ Prompted by [this article](https://the-diy-life.com/i-ran-ai-on-a-raspberry-pi-t
 | AI HAT+ 2 | intro (≈209 tok) | 6.8 | 31 s | 0% |
 
 CPU tokens/s come from Ollama's `eval_duration`; `hailo-ollama` does not report timing, so its figures are wall-clock with token counts estimated from word count. \*Two of the three Hailo physics runs dropped to 4.6–5.1 tok/s; the first was 6.9. Something else may have used the Hailo at the same time.
+
+**Rerun on HailoRT 5.2.0 (Oct 13, 2026):** the zoo now has `qwen2.5:1.5b` (not `qwen2.5-instruct:1.5b`), so both backends use that name. CPU (stock Ollama, same GGUF): DNS 11.8–11.9, physics 10.7–11.4, intro 12.0–12.1 tok/s. Hailo: DNS 6.8 and 4.3 tok/s (wall-clock) in the two runs finished before a reboot for the CMA change; the rest was not completed. The Pi was in use during the run, which may have lowered the numbers. A full Hailo rerun at 256 MB CMA is pending. Until it is done, treat the 5.2.0 Hailo speed as unknown and the 5.1.1 table above as the reference.
 
 **Why the CPU is faster:** generating a token means streaming every weight of the model through the processor once, so tokens/s ≈ memory bandwidth ÷ bytes per token. Both sides have LPDDR4X-4267 (the HAT's own 8 GB is the same speed grade as the Pi 5's RAM; Hailo does not publish the bus width, so the HAT's bandwidth could equal the Pi's ~17 GB/s or exceed it). What is different is the model file: the Hailo HEF is 2.25 GB against 0.99 GB for the CPU GGUF of the same 1.5B model. At 6.8 tok/s × 2.25 GB the HAT is moving ~15 GB/s, the same class as the Pi's 11.5 tok/s × 0.99 GB ≈ 11 GB/s. So the measurements say the HAT is not short of bandwidth; it is spending ~2.3× the bytes per token on this first-generation LLM build (less compact quantization and packing), plus a young runtime (`hailo-ollama` 5.1.x vs years-old llama.cpp ARM tuning). That gap can shrink with software; the 40 TOPS can't help with it, because batch-1 decode reuses no weights. Vision is the opposite case (small weights reused across a whole image, compute-bound), which is why the HAT runs YOLO at 20 fps and the CPU at ~1.
 
@@ -224,7 +248,7 @@ OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=~/ollama/models OLLAMA_MAX_LOADED_MODE
 OLLAMA_HOST=127.0.0.1:11434 ~/ollama/bin/ollama pull qwen2.5:1.5b                             # 986 MB
 ```
 
-It listens on loopback only. To start it at boot, install `pi-config/ollama.service` (**sudo**): `sudo cp ~/ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ollama`. Re-run the comparison with `~/voice/.venv/bin/python ~/voice/llm_bench.py cpu=http://127.0.0.1:11434,qwen2.5:1.5b hailo=http://127.0.0.1:8000,qwen2.5-instruct:1.5b`.
+It listens on loopback only. To start it at boot, install `pi-config/ollama.service` (**sudo**): `sudo cp ~/ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ollama`. Re-run the comparison with `~/voice/.venv/bin/python ~/voice/llm_bench.py cpu=http://127.0.0.1:11434,qwen2.5:1.5b hailo=http://127.0.0.1:8000,qwen2.5:1.5b`.
 
 ## Speech recognition accuracy
 
@@ -256,7 +280,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 - One request from the Mac:
   ```
   curl -s http://192.168.4.28:8000/api/chat -H 'Content-Type: application/json' \
-    -d '{"model":"qwen2.5-instruct:1.5b","stream":false,"messages":[{"role":"user","content":"What is a Raspberry Pi?"}]}'
+    -d '{"model":"qwen2.5:1.5b","stream":false,"messages":[{"role":"user","content":"What is a Raspberry Pi?"}]}'
   ```
 - Spoken question from a file: make one on the Mac with `say -o q.aiff "what is a raspberry pi" && afconvert -f WAVE -d LEI16@16000 -c 1 q.aiff q.wav`, copy it over, run `assistant.py --wav q.wav`.
 - Service health: `systemctl is-active hailo-ollama`, `journalctl -u hailo-ollama -n 50`.
@@ -264,7 +288,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 ## Gotchas
 
 - **`hailortcli run` refuses the Hailo-10H.** Use `run2`.
-- **The Python `hailo_platform` API cannot load any `*_h10.hef` on HailoRT 5.1.1.** `VDevice.configure()` returns `HAILO_NOT_IMPLEMENTED` (error 7) for all of them. Vision models must go through the GStreamer/TAPPAS plugins (`hailonet`, `hailofilter`, `hailooverlay`), which is what every script here does. `hailo_platform.genai` only covers LLM/VLM/speech classes.
+- **The Python `hailo_platform` API cannot load any `*_h10.hef` on HailoRT 5.1.1** (not re-tested on 5.2.0). `VDevice.configure()` returns `HAILO_NOT_IMPLEMENTED` (error 7) for all of them. Vision models must go through the GStreamer/TAPPAS plugins (`hailonet`, `hailofilter`, `hailooverlay`), which is what every script here does. `hailo_platform.genai` only covers LLM/VLM/speech classes.
 - **YOLO11 needs the generic TAPPAS filter.** `hailofilter` with `function-name=yolov8m` hardcodes the `yolov8m/` tensor name; leave `function-name` unset for `yolov11m_h10.hef` and the filter finds the NMS tensor by pattern.
 - **A GStreamer pipeline holds back its last frame.** Feeding one image produces no output; loop it (`multifilesrc loop=true num-buffers=10`) and keep the last file.
 - **`rpicam-vid --post-process-file` recordings have no boxes** (overlay is drawn on the low-res stream, which isn't recorded) and `rpicam-still` with it prints "HailoRT not ready!". Use the TAPPAS pipelines instead.
@@ -275,11 +299,11 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 ## Measured so far
 
-- Hailo-10H firmware 5.1.1; no newer packages in the Raspberry Pi trixie repo as of Oct 12, 2026.
-- ResNet-50: ~4.1 ms per frame.
-- Live YOLO11m: ~20 annotated frames/s written (file-change rate, not display rate).
+- HailoRT and firmware 5.2.0 on this Pi (upgraded Oct 13, 2026; 5.1.1 before that). Verified after the upgrade: `/dev/hailo0` present, PCIe link Gen 3 x1.
+- ResNet-50: ~4.1 ms per frame (5.1.1).
+- Live YOLO11m: ~20 annotated frames/s written (file-change rate, not display rate; 5.1.1). Not re-run on 5.2.0 yet.
 - YOLO on a camera still: cup on a table at ~1 ft → "cup 69%" (YOLOv8m); a cup held at the lens was not detected; YOLO11m missed that cup but matched YOLOv8m on people. Four scenes are too few to pick a winner; both models are installed.
-- LLM: `qwen2.5-instruct:1.5b` ~6.5–7 tokens/s, `qwen2.5-coder:1.5b` ~7.5 tokens/s; first request after a model switch adds ~10 s. A 131-token answer takes ~19 s; a 35-token answer ~5 s.
+- LLM on 5.1.1: `qwen2.5-instruct:1.5b` ~6.5–7 tokens/s, `qwen2.5-coder:1.5b` ~7.5 tokens/s; first request after a model switch adds ~10 s. On 5.2.0, `qwen2.5:1.5b` measured 4.3–6.8 tokens/s (wall-clock, two runs; see "Rerun on HailoRT 5.2.0").
 - Piper: a 3.1 s sentence took 4.7 s to synthesize including the one-time voice load (the split was not measured); in the assistant, sentences play with no noticeable gap.
 - Voice assistant end to end (WAV in, speech to the dummy sink): first spoken word ~0.5 s after the question, whole 3-sentence answer ~18 s including playback.
 
@@ -287,8 +311,10 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - Audible output has not been heard: no display on HDMI and no USB speaker yet. Plug a monitor/TV into HDMI0 and run `assistant.py`; `wpctl status` should show the HDMI sink.
 - Live human voice on the mic has not been tested (all tests used WAV files or typed input).
-- **HailoRT 5.2.0 upgrade (planned, not done).** The Pi runs HailoRT and hailo-ollama 5.1.1. The [RonsTechHub guide](https://ronstechhub.com/run-local-llms-raspberry-pi-5-ai-hat-plus-2/) uses 5.2.0; its packages are on Hailo's server (`hailort_5.2.0_arm64.deb` 5.2 MB, `hailort-pcie-driver_5.2.0_all.deb` 29 MB, `hailo_gen_ai_model_zoo_5.2.0_arm64.deb` 0.7 MB). No speed gain is established: the article reports no performance numbers. Some newer model builds need 5.2+. Before upgrading, record the package set (`dpkg -l 'h10*' 'hailo*' > ~/hailo-rollback-5.1.1.txt`). Afterwards, re-run `llm_bench.py` and the YOLO live test; if either regresses, roll back to the recorded 5.1.1 packages.
-- **Reader tips not yet tested:** a systemd `ExecStartPre` delay for hailo-ollama, `HAILO_LOG_LEVEL=info`, and a larger CMA pool (the Pi has the default 64 MB; no allocation failures are logged, so this is a low-priority experiment). `hailortcli monitor` shows only processes started with `HAILO_MONITOR=1`.
+- **Re-run the speed tests on 5.2.0.** The Hailo LLM benchmark at 256 MB CMA (`~/voice/bench_cma256.log`) and the monitor diagnostic (`~/voice/monitor_result.txt`, which runs `hailortcli monitor` next to `HAILO_MONITOR=1 hailortcli run2`) have not been read yet. Add the results to "CPU vs Hailo" and "Measured so far".
+- **YOLO live test on 5.2.0 and 256 MB CMA** (`run_live.sh` on port 8001, or `compare.sh`) has not been run.
+- **Reader tips not yet tested:** a systemd `ExecStartPre` delay for hailo-ollama and `HAILO_LOG_LEVEL=info`.
+- **Install the CPU Ollama service (sudo).** The CPU Ollama on port 11434 is still started by hand and stops at reboot. Install `pi-config/ollama.service` as in "CPU vs Hailo".
 
 ## To do
 

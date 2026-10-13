@@ -12,7 +12,7 @@ CPU for Vosk and Piper while the LLM generates.
 
 Usage:
   ~/voice/.venv/bin/python ~/voice/llm_bench.py \
-      cpu=http://127.0.0.1:11434,qwen2.5:1.5b  hailo=http://127.0.0.1:8000,qwen2.5-instruct:1.5b
+      cpu=http://127.0.0.1:11434,qwen2.5:1.5b  hailo=http://127.0.0.1:8000,qwen2.5:1.5b
 Writes llm_bench_results.json and llm_bench_answers.md next to this script.
 """
 import json
