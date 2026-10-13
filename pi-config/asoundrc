@@ -1,0 +1,6 @@
+# USB mic (card "Device" = USB PnP Sound Device). "plug" converts rate/format,
+# so 16 kHz mono capture for Vosk works even though the hardware is 48 kHz.
+pcm.usbmic {
+    type plug
+    slave.pcm "hw:Device,0"
+}

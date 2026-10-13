@@ -1,0 +1,17 @@
+[Unit]
+Description=Hailo Ollama LLM server (AI HAT+ 2 / Hailo-10H)
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin
+ExecStart=/usr/bin/hailo-ollama
+Restart=on-failure
+RestartSec=3
+# Models are stored in /usr/share/hailo-ollama/models (blob dir owned by admin).
+# Config: /etc/xdg/hailo-ollama/hailo-ollama.json
+
+[Install]
+WantedBy=multi-user.target
