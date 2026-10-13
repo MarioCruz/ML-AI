@@ -16,6 +16,10 @@ scp "$HERE"/hailo-test/compare.sh                              "$PI":~/yolo_test
 scp "$HERE"/pi-config/asoundrc                                 "$PI":~/.asoundrc
 scp "$HERE"/pi-config/hailo-ollama.service                     "$PI":~/hailo-ollama.service
 scp "$HERE"/pi-config/pi-web.service                           "$PI":~/pi-web.service
+scp "$HERE"/pi-config/ollama.service                           "$PI":~/ollama.service
 scp "$HERE"/README.md                                          "$PI":~/README.md
 ssh "$PI" 'chmod +x ~/voice/*.py ~/hailo-live/run_live.sh ~/hailo_test/classify.sh ~/yolo_test/compare.sh'
+# Reload the web app if it runs as the pi-web service (Restart=always brings it
+# back with the new files). No-op if the service is not installed.
+ssh "$PI" 'if systemctl is-active --quiet pi-web; then pkill -f "^/home/admin/voice/.venv/bin/python /home/admin/web/app.py"; sleep 5; systemctl is-active --quiet pi-web && echo "pi-web restarted" || echo "pi-web did not come back: run sudo systemctl restart pi-web"; fi'
 echo "deployed to $PI"

@@ -43,7 +43,7 @@
 </header>
 <main>
   <section class="panel">
-    <h2>Chat with the LLM on the AI HAT+ 2</h2>
+    <h2>Chat with a local LLM (AI HAT+ 2 or Pi CPU)</h2>
     <div id="log"></div>
     <div class="opts">
       <label><input type="checkbox" id="speak"> speak replies on the Pi</label>
@@ -188,10 +188,12 @@ pollCam();
   try {
     const s = await (await fetch('/api/status')).json();
     modelSel.innerHTML = '';
-    (s.llm_models.length ? s.llm_models : [s.default_model]).forEach(m => {
-      const o = document.createElement('option'); o.value = m; o.textContent = m; if (m === s.default_model) o.selected = true; modelSel.appendChild(o);
+    (s.models.length ? s.models : [{ id: s.default, label: s.default }]).forEach(m => {
+      const o = document.createElement('option'); o.value = m.id; o.textContent = m.label; if (m.id === s.default) o.selected = true; modelSel.appendChild(o);
     });
-    statusEl.textContent = s.llm_models.length ? 'LLM ready (' + s.llm_models.length + ' models)' : 'LLM server not reachable';
+    statusEl.textContent = s.models.length
+      ? 'LLM ready: ' + s.models.length + ' models on ' + s.backends.map(b => b === 'hailo' ? 'AI HAT+ 2' : 'Pi CPU').join(' + ')
+      : 'no LLM server reachable';
   } catch (e) { statusEl.textContent = 'status unavailable'; }
 })();
 </script>

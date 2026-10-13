@@ -39,6 +39,12 @@ from vosk import KaldiRecognizer, Model, SetLogLevel  # noqa: E402
 
 PORT = 8002
 CAMERA_FRAME = "/home/admin/hailo-live/live/latest.jpg"
+# LLM servers the page can talk to. Both speak the Ollama API.
+BACKENDS = {
+    "hailo": "http://127.0.0.1:8000",   # hailo-ollama: models run on the AI HAT+ 2
+    "cpu": "http://127.0.0.1:11434",    # stock Ollama: models run on the Pi's CPU
+}
+DEFAULT_CHOICE = "hailo|" + DEFAULT_MODEL  # picker value is "<backend>|<model>"
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -86,7 +92,11 @@ def chat():
     body = request.get_json(force=True)
     message = (body.get("message") or "").strip()
     speak = bool(body.get("speak"))
-    model = body.get("model") or DEFAULT_MODEL
+    choice = body.get("model") or DEFAULT_CHOICE
+    backend, _, model = choice.partition("|")
+    if not model:  # plain model name: assume the Hailo
+        backend, model = "hailo", backend
+    llm_url = BACKENDS.get(backend, BACKENDS["hailo"]) + "/api/chat"
     if not message:
         return jsonify({"error": "empty message"}), 400
 
@@ -99,7 +109,7 @@ def chat():
         reply, pending = [], ""
         t0 = time.time()
         try:
-            with requests.post(LLM_URL, json={"model": model, "messages": messages, "stream": True},
+            with requests.post(llm_url, json={"model": model, "messages": messages, "stream": True},
                                stream=True, timeout=300) as r:
                 r.raise_for_status()
                 for line in r.iter_lines():
@@ -222,14 +232,23 @@ def camera():
 
 @app.get("/api/status")
 def status():
-    try:
-        models = requests.get("http://127.0.0.1:8000/api/tags", timeout=3).json().get("models", [])
-        llm = [m["name"] for m in models]
-    except Exception:
-        llm = []
+    """Models from every reachable backend, as {"id": "<backend>|<model>", "label": ...}."""
+    choices, reachable = [], []
+    for backend, base in BACKENDS.items():
+        try:
+            models = requests.get(base + "/api/tags", timeout=3).json().get("models", [])
+        except Exception:
+            continue
+        reachable.append(backend)
+        for m in models:
+            name = m["name"]
+            choices.append({"id": f"{backend}|{name}",
+                            "label": f"{name}  ({'AI HAT+ 2' if backend == 'hailo' else 'Pi CPU'})"})
     return jsonify({
-        "llm_models": llm,
-        "default_model": DEFAULT_MODEL,
+        "models": choices,
+        "default": DEFAULT_CHOICE,
+        "backends": reachable,
+        "llm_models": [c["id"] for c in choices],  # kept for older clients
         "camera": camera_live(),
         "history_turns": len(history) // 2,
     })

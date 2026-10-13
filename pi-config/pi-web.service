@@ -9,7 +9,9 @@ User=admin
 Group=admin
 WorkingDirectory=/home/admin/web
 ExecStart=/home/admin/voice/.venv/bin/python /home/admin/web/app.py
-Restart=on-failure
+# "always" so that deploy.sh can reload the app without sudo: it kills the
+# process and systemd starts it again with the new files.
+Restart=always
 RestartSec=3
 # Audio output for "speak replies": pw (PipeWire default sink), hdmi, usb, or an ALSA device
 Environment=ASSISTANT_OUT=pw

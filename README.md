@@ -20,12 +20,14 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 | `pi-config/hailo-ollama.service` | `/etc/systemd/system/` **(sudo)** | Runs the LLM server at boot |
 | `web/app.py`, `web/index.html` | `~/web/` | Web front end on port 8002: chat, speak, hold-to-talk, live transcript, camera |
 | `pi-config/pi-web.service` | `/etc/systemd/system/` **(sudo)** | Runs the web front end at boot |
+| `pi-config/ollama.service` | `/etc/systemd/system/` **(sudo)** | Runs stock Ollama (CPU LLM, port 11434) at boot; optional |
+| `voice/llm_bench.py` | `~/voice/` | CPU-vs-Hailo LLM benchmark (speed, CPU load, saved answers) |
 | `deploy.sh` | — | Copies all of the above to the Pi (everything except the sudo step) |
 
 ## Hardware
 
 - Raspberry Pi 5 (8 GB) with active cooler and 27 W PSU
-- Raspberry Pi AI HAT+ 2 (Hailo-10H, 8 GB on-board RAM) on the PCIe connector. No `dtparam=pciex1` line and no stacking board were needed; it was detected as soon as it was seated properly.
+- Raspberry Pi AI HAT+ 2 (Hailo-10H, 8 GB on-board RAM) on the PCIe connector. No `dtparam=pciex1` line and no stacking board were needed; it was detected as soon as it was seated properly. The link already runs at **PCIe Gen 3 (8.0 GT/s) x1** with no `pciex1_gen=3` line (Raspberry Pi OS negotiates Gen 3 for HAT+ boards automatically; check with `cat /sys/bus/pci/devices/0001:01:00.0/current_link_speed`). The Hailo-10H supports x4 but the Pi 5 has one lane, so there is nothing to gain from PCIe settings.
 - Raspberry Pi Camera Module 3 (IMX708) on the CSI connector
 - USB microphone: TI PCM2902 codec ("USB PnP Sound Device"), capture only
 - Audio out: HDMI for now (needs a display with audio plugged into HDMI0). A USB speaker can be added later with no code change.
@@ -157,7 +159,9 @@ Options:
 ssh -t admin@192.168.4.28 'sudo cp ~/pi-web.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pi-web'
 ```
 
-If you ever start it by hand instead (`~/voice/.venv/bin/python ~/web/app.py`), stop that copy before enabling the service: two instances cannot share port 8002, and the service will crash-loop with "Address already in use" until the hand-started one is gone (`pkill -f "^/home/admin/voice/.venv/bin/python app.py"`). After editing `web/app.py`, run `./deploy.sh` and then `sudo systemctl restart pi-web`.
+If you ever start it by hand instead (`~/voice/.venv/bin/python ~/web/app.py`), stop that copy before enabling the service: two instances cannot share port 8002, and the service will crash-loop with "Address already in use" until the hand-started one is gone (`pkill -f "^/home/admin/voice/.venv/bin/python app.py"`). After editing `web/app.py` or `index.html`, just run `./deploy.sh`: it copies the files and kills the running app, and the unit's `Restart=always` starts it again with the new code, no sudo needed. (With the earlier `Restart=on-failure` a clean kill left the service stopped; that is why it was changed.)
+
+The model picker lists every model from both LLM servers, tagged "AI HAT+ 2" (hailo-ollama, port 8000) or "Pi CPU" (stock Ollama, port 11434, see "CPU vs Hailo" below); chat is routed to whichever server owns the chosen model.
 
 What the page does (all against the same pieces the voice assistant uses):
 
@@ -184,6 +188,43 @@ Open `http://192.168.4.28:8001/viewer.html` from any machine on the network. `ca
 ~/yolo_test/compare.sh                                                  # YOLOv8m vs YOLO11m on ~/yolo_test/scenes/*.jpg -> out/<model>/
 hailortcli run2 --measure-overall-latency set-net /usr/share/hailo-models/resnet_v1_50_h10.hef   # latency benchmark
 ```
+
+## CPU vs Hailo for the LLM
+
+Prompted by [this article](https://the-diy-life.com/i-ran-ai-on-a-raspberry-pi-the-results-were-unexpected/) (Pi 5 CPU ~11 tok/s, Hailo slower), measured here on Oct 13, 2026 with `voice/llm_bench.py`: the same Qwen2.5 1.5B model as a GGUF on the Pi's CPU (stock Ollama 0.40.3, `qwen2.5:1.5b`, 986 MB) and as Hailo's HEF on the AI HAT+ 2 (`hailo-ollama`, `qwen2.5-instruct:1.5b`, 2.25 GB). Temperature 0, seed 42, "hello" warm-up, the article's three prompts, 3 runs each, CPU sampled during generation.
+
+| backend | prompt | tok/s | wall | CPU during generation |
+|---|---|---|---|---|
+| Pi 5 CPU | DNS (≈385 tok) | **11.5** | 34 s | **100% of 4 cores** |
+| Pi 5 CPU | physics (853 tok) | 11.1 | 77 s | 100% |
+| Pi 5 CPU | intro (38 tok) | 11.8 | 3.5 s | 100% |
+| AI HAT+ 2 | DNS (≈255 tok) | 6.8 | 38 s | **0–3%** |
+| AI HAT+ 2 | physics (≈660 tok) | 5.5* | 123 s | 2% |
+| AI HAT+ 2 | intro (≈209 tok) | 6.8 | 31 s | 0% |
+
+CPU tokens/s come from Ollama's `eval_duration`; `hailo-ollama` does not report timing, so its figures are wall-clock with token counts estimated from word count. \*Two of the three Hailo physics runs dropped to 4.6–5.1 tok/s; the first was 6.9. Something else may have used the Hailo at the same time.
+
+**Why the CPU is faster:** generating a token means streaming every weight of the model through the processor once, so tokens/s ≈ memory bandwidth ÷ bytes per token. Both sides have LPDDR4X-4267 (the HAT's own 8 GB is the same speed grade as the Pi 5's RAM; Hailo does not publish the bus width, so the HAT's bandwidth could equal the Pi's ~17 GB/s or exceed it). What is different is the model file: the Hailo HEF is 2.25 GB against 0.99 GB for the CPU GGUF of the same 1.5B model. At 6.8 tok/s × 2.25 GB the HAT is moving ~15 GB/s, the same class as the Pi's 11.5 tok/s × 0.99 GB ≈ 11 GB/s. So the measurements say the HAT is not short of bandwidth; it is spending ~2.3× the bytes per token on this first-generation LLM build (less compact quantization and packing), plus a young runtime (`hailo-ollama` 5.1.x vs years-old llama.cpp ARM tuning). That gap can shrink with software; the 40 TOPS can't help with it, because batch-1 decode reuses no weights. Vision is the opposite case (small weights reused across a whole image, compute-bound), which is why the HAT runs YOLO at 20 fps and the CPU at ~1.
+
+**Answer quality (first run of each, in `voice/llm_bench_answers.md`):** both are weak and both invent things. Physics (correct: 1.43 s, 10.0 m, 2.86 s): CPU got the times right and the height wrong (arithmetic slip, 9.13 m); Hailo got the time and height right and the total wrong (3.47 s, wrong formula). DNS: CPU better structured, Hailo closer to the word limit but less accurate. Intro: CPU produced only a one-line title; Hailo wrote a real intro but invented products ("Raspberry Pi 3000").
+
+**What this means:**
+- The AI HAT+ 2 is bought for **vision**. For a 1.5B LLM it is ~40% slower per token than the CPU, and no accelerator in this class will beat the Pi's own memory bandwidth by much.
+- The HAT's LLM advantage is that it leaves the CPU **free** (0–3% vs 100%) for Vosk, Piper, the web page and the camera. Whether that makes the voice assistant feel better is still untested: run the LLM on each backend while Vosk transcribes and Piper speaks, and compare.
+- A voice-only topic assistant does not need the HAT. Snapshot-style "what do you see" doesn't either (CPU YOLO ~1 s per frame). Continuous live vision, or vision at the same time as voice, does (HAT, or the cheaper AI Camera/IMX500 with smaller models and no LLM).
+- Both backends stay installed; the web page lists models from both and routes to the right one. `assistant.py` still uses the Hailo by default.
+
+**Stock Ollama on the Pi (user-local, no sudo):**
+
+```
+mkdir -p ~/ollama/models && cd ~/ollama
+wget https://github.com/ollama/ollama/releases/download/v0.40.3/ollama-linux-arm64.tar.zst   # 1.5 GB
+tar --zstd -xf ollama-linux-arm64.tar.zst && rm ollama-linux-arm64.tar.zst                    # 2.1 GB unpacked
+OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=~/ollama/models OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 ~/ollama/bin/ollama serve
+OLLAMA_HOST=127.0.0.1:11434 ~/ollama/bin/ollama pull qwen2.5:1.5b                             # 986 MB
+```
+
+It listens on loopback only. To start it at boot, install `pi-config/ollama.service` (**sudo**): `sudo cp ~/ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ollama`. Re-run the comparison with `~/voice/.venv/bin/python ~/voice/llm_bench.py cpu=http://127.0.0.1:11434,qwen2.5:1.5b hailo=http://127.0.0.1:8000,qwen2.5-instruct:1.5b`.
 
 ## Speech recognition accuracy
 
@@ -246,6 +287,8 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - Audible output has not been heard: no display on HDMI and no USB speaker yet. Plug a monitor/TV into HDMI0 and run `assistant.py`; `wpctl status` should show the HDMI sink.
 - Live human voice on the mic has not been tested (all tests used WAV files or typed input).
+- **HailoRT 5.2.0 upgrade (planned, not done).** The Pi runs HailoRT and hailo-ollama 5.1.1. The [RonsTechHub guide](https://ronstechhub.com/run-local-llms-raspberry-pi-5-ai-hat-plus-2/) uses 5.2.0; its packages are on Hailo's server (`hailort_5.2.0_arm64.deb` 5.2 MB, `hailort-pcie-driver_5.2.0_all.deb` 29 MB, `hailo_gen_ai_model_zoo_5.2.0_arm64.deb` 0.7 MB). No speed gain is established: the article reports no performance numbers. Some newer model builds need 5.2+. Before upgrading, record the package set (`dpkg -l 'h10*' 'hailo*' > ~/hailo-rollback-5.1.1.txt`). Afterwards, re-run `llm_bench.py` and the YOLO live test; if either regresses, roll back to the recorded 5.1.1 packages.
+- **Reader tips not yet tested:** a systemd `ExecStartPre` delay for hailo-ollama, `HAILO_LOG_LEVEL=info`, and a larger CMA pool (the Pi has the default 64 MB; no allocation failures are logged, so this is a low-priority experiment). `hailortcli monitor` shows only processes started with `HAILO_MONITOR=1`.
 
 ## To do
 
