@@ -2,16 +2,16 @@
 # Copy this repo's scripts and config to their places on the Pi.
 # Safe to re-run. Does not touch anything that needs sudo (see README for those steps).
 #
-# Usage: ./deploy.sh [user@host]      default admin@192.168.4.28
+# Usage: ./deploy.sh [user@host]      default admin@ml-ai.local
 set -euo pipefail
-PI="${1:-admin@192.168.4.28}"
+PI="${1:-admin@ml-ai.local}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 ssh "$PI" 'mkdir -p ~/voice ~/web ~/hailo-live ~/hailo_test ~/yolo_test/scenes'
 scp "$HERE"/voice/*.py                                         "$PI":~/voice/
 scp "$HERE"/web/app.py "$HERE"/web/index.html                  "$PI":~/web/
 scp "$HERE"/hailo-live/*                                       "$PI":~/hailo-live/
-scp "$HERE"/hailo-test/classify.sh                             "$PI":~/hailo_test/
+scp "$HERE"/hailo-test/classify.sh "$HERE"/hailo-test/vlm_test.py "$PI":~/hailo_test/
 scp "$HERE"/hailo-test/compare.sh                              "$PI":~/yolo_test/
 scp "$HERE"/pi-config/asoundrc                                 "$PI":~/.asoundrc
 scp "$HERE"/pi-config/hailo-ollama.service                     "$PI":~/hailo-ollama.service

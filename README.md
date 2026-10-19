@@ -2,8 +2,8 @@
 
 A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the Hailo, speaks the answer with Piper, and can run YOLO object detection on the Pi camera. Everything runs offline on the Pi. This is the base for the Moonlighter FabLab high-school AI program.
 
-- Pi: `admin@192.168.4.28`, hostname `ML-AI`, Raspberry Pi OS (Debian 13 trixie, 64-bit), kernel 6.18, Python 3.13, 8 GB RAM, 32 GB SD.
-- Passwordless sudo is **not** set up. Steps marked **(sudo)** below must be run in an interactive terminal; from the Mac, `ssh -t admin@192.168.4.28 'sudo ...'` prompts for the password.
+- Pi: `admin@ml-ai.local` (mDNS; the DHCP address changed from 192.168.4.28 to 192.168.4.69 on Oct 19, 2026, so use the name), hostname `ML-AI`, Raspberry Pi OS (Debian 13 trixie, 64-bit), kernel 6.18, Python 3.13, 8 GB RAM, 32 GB SD.
+- Passwordless sudo is **not** set up. Steps marked **(sudo)** below must be run in an interactive terminal; from the Mac, `ssh -t admin@ml-ai.local 'sudo ...'` prompts for the password.
 
 ## What is in this repo
 
@@ -39,8 +39,8 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 Flash Raspberry Pi OS 64-bit (trixie) with the Imager, set user `admin`, enable SSH and Wi-Fi. Then:
 
 ```
-ssh-copy-id admin@192.168.4.28                      # from the Mac, key login
-ssh -t admin@192.168.4.28 'sudo apt update && sudo apt full-upgrade -y && sudo reboot'   # (sudo)
+ssh-copy-id admin@ml-ai.local                      # from the Mac, key login
+ssh -t admin@ml-ai.local 'sudo apt update && sudo apt full-upgrade -y && sudo reboot'   # (sudo)
 ```
 
 ### 2. Hailo driver for the AI HAT+ 2 (sudo)
@@ -48,7 +48,7 @@ ssh -t admin@192.168.4.28 'sudo apt update && sudo apt full-upgrade -y && sudo r
 `hailo-h10-all` is for the AI HAT+ 2. Do not install `hailo-all` (that is for the older AI Kit / AI HAT+); they conflict.
 
 ```
-ssh -t admin@192.168.4.28 'sudo apt install -y dkms hailo-h10-all && sudo reboot'
+ssh -t admin@ml-ai.local 'sudo apt install -y dkms hailo-h10-all && sudo reboot'
 ```
 
 Verify after the reboot:
@@ -66,7 +66,7 @@ A fresh install from the Raspberry Pi repo (checked Oct 12, 2026) gives HailoRT 
 Download the three packages from Hailo's server (the same server as the 5.1.1 zoo `.deb`, see step 6) into `~/hailo520/` on the Pi: `hailort_5.2.0_arm64.deb`, `hailort-pcie-driver_5.2.0_all.deb`, `hailo_gen_ai_model_zoo_5.2.0_arm64.deb`. Install all three together, or the driver and runtime versions will not match (`HAILO_INVALID_DRIVER_VERSION`):
 
 ```
-ssh -t admin@192.168.4.28 'sudo dpkg -i ~/hailo520/hailort_5.2.0_arm64.deb ~/hailo520/hailort-pcie-driver_5.2.0_all.deb ~/hailo520/hailo_gen_ai_model_zoo_5.2.0_arm64.deb && sudo reboot'   # (sudo)
+ssh -t admin@ml-ai.local 'sudo dpkg -i ~/hailo520/hailort_5.2.0_arm64.deb ~/hailo520/hailort-pcie-driver_5.2.0_all.deb ~/hailo520/hailo_gen_ai_model_zoo_5.2.0_arm64.deb && sudo reboot'   # (sudo)
 ```
 
 Before upgrading, save the package list so you can roll back: `dpkg -l 'h10*' 'hailo*' > ~/hailo-rollback-5.1.1.txt`. The zoo install replaces `/usr/share/hailo-ollama`, so the models must be pulled again afterwards (step 6). Verify `hailortcli fw-control identify` shows firmware 5.2.0.
@@ -79,6 +79,8 @@ Nothing to install. Check and take a still:
 rpicam-hello --list-cameras           # should list imx708
 rpicam-still -n -t 2000 --width 640 --height 640 -o test.jpg
 ```
+
+If `rpicam-hello` says "rpicam-apps currently only supports the Raspberry Pi platforms", the firmware mailbox is broken; check `cmdline.txt` for a `cma=` parameter (see 6b).
 
 ### 4. Microphone
 
@@ -110,7 +112,7 @@ mkdir -p ~/voice/piper && cd ~/voice/piper && ~/voice/.venv/bin/python -m piper.
 
 ```
 cd ~ && wget https://dev-public.hailo.ai/2025_12/Hailo10/hailo_gen_ai_model_zoo_5.2.0_arm64.deb   # check the directory name on Hailo's server if this 404s
-ssh -t admin@192.168.4.28 'sudo dpkg -i ~/hailo_gen_ai_model_zoo_5.2.0_arm64.deb'                   # (sudo)
+ssh -t admin@ml-ai.local 'sudo dpkg -i ~/hailo_gen_ai_model_zoo_5.2.0_arm64.deb'                   # (sudo)
 ```
 
 If you are on 5.1.1, use `hailo_gen_ai_model_zoo_5.1.1_arm64.deb` (7.9 MB) instead. If you did step 2b, the zoo package is already installed, so skip this step.
@@ -118,7 +120,7 @@ If you are on 5.1.1, use `hailo_gen_ai_model_zoo_5.1.1_arm64.deb` (7.9 MB) inste
 Install the service (unit file comes from `pi-config/hailo-ollama.service` via `deploy.sh`; it runs as `admin`, restarts on failure, working directory `/home/admin`):
 
 ```
-ssh -t admin@192.168.4.28 'sudo cp ~/hailo-ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now hailo-ollama'   # (sudo)
+ssh -t admin@ml-ai.local 'sudo cp ~/hailo-ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now hailo-ollama'   # (sudo)
 ```
 
 Pull the models (about 1.5–2 MB/s here, so 15–20 minutes each). Pull them again after any zoo package install, because that replaces the model store:
@@ -133,15 +135,20 @@ curl -s http://127.0.0.1:8000/api/tags             # shows what is pulled
 
 Models land in `/usr/share/hailo-ollama/models/blob/` (both models together about 3.8 GB on 5.2.0). Config is `/etc/xdg/hailo-ollama/hailo-ollama.json`; it binds `0.0.0.0:8000`, so the API is reachable from the LAN. Change `host` to `127.0.0.1` to keep it Pi-only.
 
-### 6b. Larger CMA memory pool (sudo, optional)
+### 6b. CMA memory pool: leave it at the default
 
-Hailo's driver uses a contiguous memory pool (CMA). The default is 64 MB. On this Pi it was raised to 256 MB by adding `cma=256M` to the kernel command line, which takes effect after a reboot. Nothing failed at 64 MB; this was an experiment to see whether it helps the LLM speed (result in "CPU vs Hailo" below).
+Hailo's driver uses a contiguous memory pool (CMA), 64 MB by default. On Oct 13, 2026 it was raised to 256 MB with `cma=256M` on the kernel command line. **Don't do this.** Two results:
+
+- It did not help the LLM: `qwen2.5:1.5b` on the Hailo ran at 6.8 tok/s at 64 MB and 6.8 tok/s at 256 MB.
+- It broke the camera, the 3D core and `vcgencmd`. A `cma=` command-line parameter bypasses the device tree's `alloc-ranges`, so the pool was placed at 0xde000000 (3.5 GB), out of reach of the VideoCore firmware. Every firmware mailbox request then returns status 0, the `raspberrypi-clk` driver fails with -22, and `v3d`, `pispbe` (the ISP) and the HEVC decoder never probe. Symptoms: `rpicam-hello --list-cameras` says "rpicam-apps currently only supports the Raspberry Pi platforms", `picamera2` lists no cameras, `vcgencmd version` says `ioctl_set_msg failed`. See [raspberrypi/linux #7230](https://github.com/raspberrypi/linux/issues/7230).
+
+Revert (the original file was saved as `cmdline.txt.bak`):
 
 ```
-ssh -t admin@192.168.4.28 'sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak && sudo sed -i "s/$/ cma=256M/" /boot/firmware/cmdline.txt && sudo reboot'   # (sudo)
+ssh -t admin@ml-ai.local 'sudo cp /boot/firmware/cmdline.txt.bak /boot/firmware/cmdline.txt && sudo reboot'   # (sudo)
 ```
 
-Check after the reboot: `grep CmaTotal /proc/meminfo` should show `262144 kB`. To undo, copy the `.bak` file back and reboot.
+After the reboot `grep CmaTotal /proc/meminfo` should show `65536 kB` and `rpicam-hello --list-cameras` should list the imx708. If a bigger pool is ever wanted, use `dtoverlay=vc4-kms-v3d,cma-256` in `config.txt` instead, which keeps the placement limits.
 
 ### 7. Copy the scripts
 
@@ -175,10 +182,10 @@ Options:
 
 ### Web front end
 
-**http://192.168.4.28:8002/** from any device on the network. It runs as the systemd service `pi-web` (installed and verified on Oct 13, 2026; starts at boot after `hailo-ollama`). Manage with `sudo systemctl {status,restart,stop} pi-web`; logs via `journalctl -u pi-web -n 50`. To install it on a fresh Pi (**sudo**):
+**http://ml-ai.local:8002/** from any device on the network. It runs as the systemd service `pi-web` (installed and verified on Oct 13, 2026; starts at boot after `hailo-ollama`). Manage with `sudo systemctl {status,restart,stop} pi-web`; logs via `journalctl -u pi-web -n 50`. To install it on a fresh Pi (**sudo**):
 
 ```
-ssh -t admin@192.168.4.28 'sudo cp ~/pi-web.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pi-web'
+ssh -t admin@ml-ai.local 'sudo cp ~/pi-web.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pi-web'
 ```
 
 If you ever start it by hand instead (`~/voice/.venv/bin/python ~/web/app.py`), stop that copy before enabling the service: two instances cannot share port 8002, and the service will crash-loop with "Address already in use" until the hand-started one is gone (`pkill -f "^/home/admin/voice/.venv/bin/python app.py"`). After editing `web/app.py` or `index.html`, just run `./deploy.sh`: it copies the files and kills the running app, and the unit's `Restart=always` starts it again with the new code, no sudo needed. (With the earlier `Restart=on-failure` a clean kill left the service stopped; that is why it was changed.)
@@ -189,7 +196,7 @@ What the page does (all against the same pieces the voice assistant uses):
 
 - **Chat**: type a question, the reply streams in from `hailo-ollama` with the same short-answer prompt and 4-turn history as `assistant.py`. A model picker lists what's pulled. "New conversation" clears the history.
 - **Speak replies on the Pi**: when checked, each sentence is spoken through the Pi's audio output (Piper, PipeWire default sink) in order while the text keeps streaming. Set `ASSISTANT_OUT=hdmi|usb|<alsa device>` in the service file to force an output.
-- **Hold to talk**: records on the laptop/phone, sends the audio to the Pi, transcribes it with Vosk (small model) plus `stt_fix.py`, and asks the question. **Browsers only allow mic access on HTTPS or `localhost`**, so over plain `http://192.168.4.28:8002` the button will report "mic not available" in Chrome/Safari. Workarounds: open `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add `http://192.168.4.28:8002`; or run the page over HTTPS with a self-signed certificate (not set up yet). Typing and the Pi's own USB mic are unaffected.
+- **Hold to talk**: records on the laptop/phone, sends the audio to the Pi, transcribes it with Vosk (small model) plus `stt_fix.py`, and asks the question. **Browsers only allow mic access on HTTPS or `localhost`**, so over plain `http://ml-ai.local:8002` the button will report "mic not available" in Chrome/Safari. Workarounds: open `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add `http://ml-ai.local:8002`; or run the page over HTTPS with a self-signed certificate (not set up yet). Typing and the Pi's own USB mic are unaffected.
 - **Voice assistant transcript**: live `HEARD:` / `ANSWER:` lines from `assistant.py` (it appends each to `~/voice/transcript.jsonl`; the page follows that file). Lets a room see what the mic understood.
 - **Camera**: shows the latest YOLO frame while `~/hailo-live/run_live.sh` is running (it checks the frame is under 5 s old).
 
@@ -198,10 +205,10 @@ Endpoints, for students who want to build on it: `POST /api/chat` (NDJSON stream
 ### Live object detection (YOLO11m on the camera)
 
 ```
-cd ~/hailo-live && ./run_live.sh          # Ctrl-C to stop
+cd ~/hailo-live && ./run_live.sh          # Ctrl-C to stop; from another shell: ~/hailo-live/stop_live.sh
 ```
 
-Open `http://192.168.4.28:8001/viewer.html` from any machine on the network. `capture_letterbox.py` pads each 640×480 camera frame to 640×640 (no stretching) and pipes it into `hailonet`; annotated frames are written to `live/latest.jpg` about 20 times a second. (The viewer is on 8001 because `hailo-ollama` owns 8000.)
+Open `http://ml-ai.local:8001/viewer.html` from any machine on the network. `capture_letterbox.py` pads each 640×480 camera frame to 640×640 (no stretching) and pipes it into `hailonet`; annotated frames are written to `live/latest.jpg` about 20 times a second. (The viewer is on 8001 because `hailo-ollama` owns 8000.)
 
 ### One-off tests
 
@@ -210,6 +217,55 @@ Open `http://192.168.4.28:8001/viewer.html` from any machine on the network. `ca
 ~/yolo_test/compare.sh                                                  # YOLOv8m vs YOLO11m on ~/yolo_test/scenes/*.jpg -> out/<model>/
 hailortcli run2 --measure-overall-latency set-net /usr/share/hailo-models/resnet_v1_50_h10.hef   # latency benchmark
 ```
+
+### Vision-language model on the HAT (Qwen2-VL-2B)
+
+`hailo-ollama` serves text LLMs only (Hailo's USAGE.rst says so, and the VLM is absent from `/hailo/v1/list`). The VLM runs through the HailoRT Python GenAI API instead, which works on 5.2.0. One-time setup, no sudo:
+
+```
+cd ~/hailo520 && wget https://dev-public.hailo.ai/2026_01/Hailo10/hailort-5.2.0-cp313-cp313-linux_aarch64.whl   # Python 3.13 wheel; not linked from Hailo's site
+~/voice/.venv/bin/pip install ~/hailo520/hailort-5.2.0-cp313-cp313-linux_aarch64.whl opencv-python-headless
+wget https://dev-public.hailo.ai/v5.2.0/blob/Qwen2-VL-2B-Instruct.hef          # 3.1 GB; other 5.2.0 HEFs live at the same path
+```
+
+The HAT is exclusive on 5.2.0: `hailo-ollama` holds it while running, and anything else gets `HAILO_OUT_OF_PHYSICAL_DEVICES` (error 74). Stop it, run the test, start it again:
+
+```
+ssh -t admin@ml-ai.local 'sudo systemctl stop hailo-ollama'                           # (sudo)
+~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --image ~/hailo_test/cam640.jpg --prompt "Describe this image in two sentences."
+~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --camera                            # grabs a frame with rpicam-still first
+ssh -t admin@ml-ai.local 'sudo systemctl start hailo-ollama'                          # (sudo)
+```
+
+Measured Oct 19, 2026: model load 7.8 s, 12.5 s for a 67-word answer (~7 tok/s including the image prefill), and the description of `cam640.jpg` (a cardboard box corner with a glare spot over a wooden floor) was accurate. The HEF wants 336×336 RGB; the script resizes. Sharing the device between `hailo-ollama` and other apps (`HAILO_OLLAMA_VDEVICE_GROUP_ID`) only arrives with model zoo 5.3.0, which needs HailoRT 5.3.0 and has a [reported broken Pi dependency](https://community.hailo.ai/t/bug-report-hailo-gen-ai-model-zoo-5-3-0-uninstallable-on-raspberry-pi-with-hailo-10h/19226).
+
+## Test checklist
+
+Run these after any upgrade, kernel change or reboot. All from `admin@ml-ai.local`; the two marked **(sudo)** need a password.
+
+```
+grep CmaTotal /proc/meminfo                                   # 65536 kB. If not, check cmdline.txt for cma= (6b)
+vcgencmd version                                              # a date, not "ioctl_set_msg failed"
+hailortcli fw-control identify | grep -i "firmware version"   # 5.2.0
+rpicam-hello --list-cameras                                   # imx708 listed
+curl -s localhost:8000/api/tags | python3 -m json.tool | grep '"name"'     # hailo-ollama: the pulled models
+~/voice/.venv/bin/python ~/voice/llm_bench.py hailo=http://127.0.0.1:8000,llama3.2:1b   # ~8.4 tok/s; copy results aside first
+~/yolo_test/compare.sh                                        # 8 "done" lines, boxes in ~/yolo_test/out/*/
+cd ~/hailo-live && ./run_live.sh                              # open http://ml-ai.local:8001/viewer.html, then ~/hailo-live/stop_live.sh
+~/voice/.venv/bin/python ~/voice/assistant.py --text          # typed question, spoken/printed answer
+curl -s localhost:8002/api/status                             # web UI: both backends listed, "camera": true while run_live.sh runs
+```
+
+Vision-language model (the HAT must be free):
+
+```
+ssh -t admin@ml-ai.local 'sudo systemctl stop hailo-ollama'                                   # (sudo)
+~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --image ~/hailo_test/cam640.jpg              # box/floor description, ~7 tok/s
+~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --camera --prompt "What objects do you see?"  # live frame
+ssh -t admin@ml-ai.local 'sudo systemctl start hailo-ollama'                                  # (sudo)
+```
+
+Expected numbers are in "Measured so far".
 
 ## CPU vs Hailo for the LLM
 
@@ -226,7 +282,14 @@ Prompted by [this article](https://the-diy-life.com/i-ran-ai-on-a-raspberry-pi-t
 
 CPU tokens/s come from Ollama's `eval_duration`; `hailo-ollama` does not report timing, so its figures are wall-clock with token counts estimated from word count. \*Two of the three Hailo physics runs dropped to 4.6–5.1 tok/s; the first was 6.9. Something else may have used the Hailo at the same time.
 
-**Rerun on HailoRT 5.2.0 (Oct 13, 2026):** the zoo now has `qwen2.5:1.5b` (not `qwen2.5-instruct:1.5b`), so both backends use that name. CPU (stock Ollama, same GGUF): DNS 11.8–11.9, physics 10.7–11.4, intro 12.0–12.1 tok/s. Hailo: DNS 6.8 and 4.3 tok/s (wall-clock) in the two runs finished before a reboot for the CMA change; the rest was not completed. The Pi was in use during the run, which may have lowered the numbers. A full Hailo rerun at 256 MB CMA is pending. Until it is done, treat the 5.2.0 Hailo speed as unknown and the 5.1.1 table above as the reference.
+**Rerun on HailoRT 5.2.0 (Oct 13 and 19, 2026):** the zoo now has `qwen2.5:1.5b` (not `qwen2.5-instruct:1.5b`), so both backends use that name. CPU (stock Ollama, same GGUF): DNS 11.8–11.9, physics 10.7–11.4, intro 12.0–12.1 tok/s. Hailo, wall-clock, mean of 3 runs each, Pi otherwise idle:
+
+| Hailo model | DNS | physics | intro | Hailo's own figure |
+|---|---|---|---|---|
+| `qwen2.5:1.5b` (256 MB CMA, Oct 13) | 6.8 | 6.8 | 6.8 | 7.4 |
+| `llama3.2:1b` (Oct 19) | 8.4 | 8.5 | 8.4 | 9.9 |
+
+So 5.2.0 matches 5.1.1 for Qwen, the CMA size makes no difference, and Llama 3.2 1B is ~25% faster because it is smaller. Hailo's published tokens/s for every zoo model are in [MODELS.rst](https://github.com/hailo-ai/hailo_model_zoo_genai/blob/main/docs/MODELS.rst); the run-to-run spread here was under 0.1 tok/s. Llama's answers are no better: its physics answer uses t = 2v/g and gets 11 s, and its blog intro claims a Pi 5 is "1000 times faster than a traditional computer". Results are on the Pi as `~/voice/llm_bench_results_llama32_1b.json` and `*_qwen25_cma256.json` with the matching `answers.md` files; `llm_bench.py` overwrites `llm_bench_results.json`, so copy results aside before another run.
 
 **Why the CPU is faster:** generating a token means streaming every weight of the model through the processor once, so tokens/s ≈ memory bandwidth ÷ bytes per token. Both sides have LPDDR4X-4267 (the HAT's own 8 GB is the same speed grade as the Pi 5's RAM; Hailo does not publish the bus width, so the HAT's bandwidth could equal the Pi's ~17 GB/s or exceed it). What is different is the model file: the Hailo HEF is 2.25 GB against 0.99 GB for the CPU GGUF of the same 1.5B model. At 6.8 tok/s × 2.25 GB the HAT is moving ~15 GB/s, the same class as the Pi's 11.5 tok/s × 0.99 GB ≈ 11 GB/s. So the measurements say the HAT is not short of bandwidth; it is spending ~2.3× the bytes per token on this first-generation LLM build (less compact quantization and packing), plus a young runtime (`hailo-ollama` 5.1.x vs years-old llama.cpp ARM tuning). That gap can shrink with software; the 40 TOPS can't help with it, because batch-1 decode reuses no weights. Vision is the opposite case (small weights reused across a whole image, compute-bound), which is why the HAT runs YOLO at 20 fps and the CPU at ~1.
 
@@ -279,7 +342,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 - Typed chat on the Pi: `~/voice/.venv/bin/python ~/voice/assistant.py --text --no-tts`
 - One request from the Mac:
   ```
-  curl -s http://192.168.4.28:8000/api/chat -H 'Content-Type: application/json' \
+  curl -s http://ml-ai.local:8000/api/chat -H 'Content-Type: application/json' \
     -d '{"model":"qwen2.5:1.5b","stream":false,"messages":[{"role":"user","content":"What is a Raspberry Pi?"}]}'
   ```
 - Spoken question from a file: make one on the Mac with `say -o q.aiff "what is a raspberry pi" && afconvert -f WAVE -d LEI16@16000 -c 1 q.aiff q.wav`, copy it over, run `assistant.py --wav q.wav`.
@@ -288,7 +351,9 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 ## Gotchas
 
 - **`hailortcli run` refuses the Hailo-10H.** Use `run2`.
-- **The Python `hailo_platform` API cannot load any `*_h10.hef` on HailoRT 5.1.1** (not re-tested on 5.2.0). `VDevice.configure()` returns `HAILO_NOT_IMPLEMENTED` (error 7) for all of them. Vision models must go through the GStreamer/TAPPAS plugins (`hailonet`, `hailofilter`, `hailooverlay`), which is what every script here does. `hailo_platform.genai` only covers LLM/VLM/speech classes.
+- **The Python `hailo_platform` API cannot load any `*_h10.hef` on HailoRT 5.1.1** (not re-tested on 5.2.0). `VDevice.configure()` returns `HAILO_NOT_IMPLEMENTED` (error 7) for all of them. Vision models must go through the GStreamer/TAPPAS plugins (`hailonet`, `hailofilter`, `hailooverlay`), which is what every script here does. `hailo_platform.genai` (LLM/VLM/Speech2Text) does work on 5.2.0 with the wheel from "Vision-language model on the HAT".
+- **`hailo-ollama` owns the HAT.** While it runs, `hailortcli monitor`, `run2` and the Python GenAI API all fail with `HAILO_OUT_OF_PHYSICAL_DEVICES` (74). Stop the service first (sudo).
+- **Never put `cma=` on the kernel command line.** It breaks the firmware mailbox and with it the camera (see 6b).
 - **YOLO11 needs the generic TAPPAS filter.** `hailofilter` with `function-name=yolov8m` hardcodes the `yolov8m/` tensor name; leave `function-name` unset for `yolov11m_h10.hef` and the filter finds the NMS tensor by pattern.
 - **A GStreamer pipeline holds back its last frame.** Feeding one image produces no output; loop it (`multifilesrc loop=true num-buffers=10`) and keep the last file.
 - **`rpicam-vid --post-process-file` recordings have no boxes** (overlay is drawn on the low-res stream, which isn't recorded) and `rpicam-still` with it prints "HailoRT not ready!". Use the TAPPAS pipelines instead.
@@ -301,9 +366,10 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - HailoRT and firmware 5.2.0 on this Pi (upgraded Oct 13, 2026; 5.1.1 before that). Verified after the upgrade: `/dev/hailo0` present, PCIe link Gen 3 x1.
 - ResNet-50: ~4.1 ms per frame (5.1.1).
-- Live YOLO11m: ~20 annotated frames/s written (file-change rate, not display rate; 5.1.1). Not re-run on 5.2.0 yet.
+- Live YOLO11m: ~20 annotated frames/s written on 5.1.1; on 5.2.0 (Oct 19, 2026, after the CMA revert) 15.0 frames/s, which is the `framerate=15/1` cap in `run_live.sh`, measured as `latest.jpg` mtime changes over 10 s. `compare.sh` (both YOLO models through TAPPAS) also ran fine on 5.2.0 **while `hailo-ollama` was active**: the GStreamer `hailonet` path shares the HAT, unlike the Python GenAI API.
 - YOLO on a camera still: cup on a table at ~1 ft → "cup 69%" (YOLOv8m); a cup held at the lens was not detected; YOLO11m missed that cup but matched YOLOv8m on people. Four scenes are too few to pick a winner; both models are installed.
-- LLM on 5.1.1: `qwen2.5-instruct:1.5b` ~6.5–7 tokens/s, `qwen2.5-coder:1.5b` ~7.5 tokens/s; first request after a model switch adds ~10 s. On 5.2.0, `qwen2.5:1.5b` measured 4.3–6.8 tokens/s (wall-clock, two runs; see "Rerun on HailoRT 5.2.0").
+- LLM on 5.1.1: `qwen2.5-instruct:1.5b` ~6.5–7 tokens/s, `qwen2.5-coder:1.5b` ~7.5 tokens/s; first request after a model switch adds ~10 s. On 5.2.0: `qwen2.5:1.5b` 6.8 tok/s, `llama3.2:1b` 8.4 tok/s (wall-clock, 3 runs each; see "Rerun on HailoRT 5.2.0"). CMA 64 MB vs 256 MB: no difference.
+- Qwen2-VL-2B on the Hailo through the Python GenAI API (5.2.0): load 7.8 s, ~7 tok/s including the image prefill, accurate description of a test photo.
 - Piper: a 3.1 s sentence took 4.7 s to synthesize including the one-time voice load (the split was not measured); in the assistant, sentences play with no noticeable gap.
 - Voice assistant end to end (WAV in, speech to the dummy sink): first spoken word ~0.5 s after the question, whole 3-sentence answer ~18 s including playback.
 
@@ -311,8 +377,8 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - Audible output has not been heard: no display on HDMI and no USB speaker yet. Plug a monitor/TV into HDMI0 and run `assistant.py`; `wpctl status` should show the HDMI sink.
 - Live human voice on the mic has not been tested (all tests used WAV files or typed input).
-- **Re-run the speed tests on 5.2.0.** The Hailo LLM benchmark at 256 MB CMA (`~/voice/bench_cma256.log`) and the monitor diagnostic (`~/voice/monitor_result.txt`, which runs `hailortcli monitor` next to `HAILO_MONITOR=1 hailortcli run2`) have not been read yet. Add the results to "CPU vs Hailo" and "Measured so far".
-- **YOLO live test on 5.2.0 and 256 MB CMA** (`run_live.sh` on port 8001, or `compare.sh`) has not been run.
+- **`vlm_test.py --camera`** has not been run (needs `hailo-ollama` stopped, which is sudo); only the `--image` path is verified.
+- **Bootloader EEPROM update** is available (May 2026 installed, Sep 2026 available): `sudo rpi-eeprom-update -a`. Optional.
 - **Reader tips not yet tested:** a systemd `ExecStartPre` delay for hailo-ollama and `HAILO_LOG_LEVEL=info`.
 - **Install the CPU Ollama service (sudo).** The CPU Ollama on port 11434 is still started by hand and stops at reboot. Install `pi-config/ollama.service` as in "CPU vs Hailo".
 
