@@ -53,12 +53,15 @@ fi
 
 # ---------------------------------------------------------------- 2. kernel cmdline sanity
 if ! done_ cmdline; then
-  say "2. no cma= on the kernel command line (it breaks the camera and the firmware mailbox, README 6b)"
-  if grep -q "cma=" /boot/firmware/cmdline.txt; then
+  say "2. kernel command line: no cma= (breaks the camera, README 6b), no leftover fsck.mode=force"
+  if grep -q "cma=\|fsck.mode=force" /boot/firmware/cmdline.txt; then
     sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
-    sudo sed -i 's/ *cma=[0-9]*[MmKk]//' /boot/firmware/cmdline.txt
+    # fsck.mode=force is the way to get a full root fsck on this image (the /forcefsck file is
+    # ignored for root); it is added by hand after a corruption, and removed here so the 57 GB
+    # root is not checked on every boot.
+    sudo sed -i -e 's/ *cma=[0-9]*[MmKk]//' -e 's/ *fsck.mode=force//' /boot/firmware/cmdline.txt
     mark cmdline
-    need_reboot "Removed cma= from cmdline.txt"
+    need_reboot "Cleaned cmdline.txt"
   fi
   mark cmdline
 fi
