@@ -21,7 +21,7 @@ canvas.save(\"letterboxed/$name.jpg\", quality=95)
     rm -rf "tmp_$model"; mkdir "tmp_$model"
     gst-launch-1.0 -q multifilesrc location="letterboxed/$name.jpg" loop=true num-buffers=10 \
       ! jpegdec ! videoconvert ! video/x-raw,format=RGB,width=640,height=640 \
-      ! hailonet hef-path=/usr/share/hailo-models/$( [ $model = yolov8m ] && echo yolov8m_h10 || echo yolov11m_h10 ).hef \
+      ! hailonet hef-path=/usr/share/hailo-models/$( [ $model = yolov8m ] && echo yolov8m_h10 || echo yolov11m_h10 ).hef vdevice-group-id=HAILO_OLLAMA_SHARED \
       ! hailofilter so-path="$POST" qos=false \
       ! hailooverlay ! videoconvert ! jpegenc ! multifilesink location="tmp_$model/f_%02d.jpg"
     cp "$(ls tmp_$model/f_*.jpg | sort | tail -1)" "out/$model/$name.jpg"

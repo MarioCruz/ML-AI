@@ -206,7 +206,7 @@ class Retriever:
             label = f"{short(h['doc'])}, page {h['page']}"
             parts.append(f"[{label}] {text}")
             sources.append(label)
-        return "\n\n".join(parts), sources
+        return " ".join(parts), sources  # one line: hailo-ollama 5.3.0 rejects newlines in messages
 
 
 def short(doc):
@@ -217,7 +217,7 @@ def build_messages(system_prompt, history, question, context):
     """Messages for /api/chat with the excerpts in the user turn (history stays clean)."""
     if context:
         system = system_prompt + " " + RAG_INSTRUCTIONS
-        user = f"Document excerpts:\n{context}\n\nQuestion: {question}"
+        user = f"Document excerpts: {context} Question: {question}"
     else:
         system, user = system_prompt, question
     return [{"role": "system", "content": system}] + list(history) + [{"role": "user", "content": user}]
@@ -251,7 +251,8 @@ def main():
     messages = build_messages(SYSTEM_PROMPT, [], question, context)
     print(f"\ncontext words: {len(context.split())}  sources: {sources or 'none'}\n")
     t0 = time.time()
-    rsp = requests.post(LLM_URL, json={"model": DEFAULT_MODEL, "messages": messages, "stream": False}, timeout=300)
+    from assistant import hailo_safe
+    rsp = requests.post(LLM_URL, json={"model": DEFAULT_MODEL, "messages": hailo_safe(messages), "stream": False}, timeout=300)
     rsp.raise_for_status()
     print("ANSWER:", rsp.json()["message"]["content"].strip())
     print(f"({time.time() - t0:.1f} s)")

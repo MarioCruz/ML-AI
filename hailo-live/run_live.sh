@@ -1,19 +1,14 @@
 #!/bin/bash
-# Live YOLO11m detection on the Hailo-10H, using the Pi camera.
+# Live YOLO11m detection on the Hailo-10H with the Pi camera, sharing the HAT
+# with hailo-ollama (HailoRT 5.3.0+, Python API; see live_yolo.py).
 #
-# Camera frames are letterboxed to 640x640 by capture_letterbox.py, then fed
-# into hailonet. The generic TAPPAS filter (no function-name) decodes the
-# YOLO11 NMS output. Each annotated frame overwrites live/latest.jpg, which
-# viewer.html reloads.
+# Annotated frames overwrite live/latest.jpg; viewer.html (port 8001) and the
+# web page's camera panel reload it. hailo-live.service runs this at boot.
 #
-# Usage (on the Pi, from ~/hailo_test):
-#   ./run_live.sh            # Ctrl-C to stop
-#   view: http://<pi-ip>:8001/viewer.html   (8000 belongs to hailo-ollama)
+# Usage (on the Pi):  ./run_live.sh      # Ctrl-C to stop; or ./stop_live.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-HEF=/usr/share/hailo-models/yolov11m_h10.hef
-POST=/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libyolo_hailortpp_post.so
 LIVE="$HERE/live"
 mkdir -p "$LIVE"
 cp "$HERE/viewer.html" "$LIVE/viewer.html"
@@ -23,9 +18,4 @@ python3 -m http.server 8001 --directory "$LIVE" --bind 0.0.0.0 >/dev/null 2>&1 &
 HTTP_PID=$!
 trap 'kill $HTTP_PID 2>/dev/null || true' EXIT
 
-python3 "$HERE/capture_letterbox.py" | gst-launch-1.0 -q \
-  fdsrc fd=0 ! rawvideoparse width=640 height=640 format=rgb framerate=15/1 \
-  ! hailonet hef-path="$HEF" \
-  ! hailofilter so-path="$POST" qos=false \
-  ! hailooverlay ! videoconvert ! jpegenc quality=85 \
-  ! multifilesink location="$LIVE/latest.jpg"
+exec /home/admin/voice/.venv/bin/python "$HERE/live_yolo.py"

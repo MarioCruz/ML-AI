@@ -23,7 +23,7 @@ import numpy as np
 from hailo_platform import VDevice
 from hailo_platform.genai import VLM
 
-HEF = "/home/admin/hailo520/Qwen2-VL-2B-Instruct.hef"
+HEF = "/home/admin/hailo530/Qwen2-VL-2B-Instruct.hef"  # must match the installed HailoRT version
 SIZE = 336  # Qwen2-VL-2B HEF expects 336x336 RGB
 
 
@@ -54,7 +54,7 @@ def main():
 
     t0 = time.time()
     params = VDevice.create_params()
-    params.group_id = "SHARED"
+    params.group_id = "HAILO_OLLAMA_SHARED"  # same group as hailo-ollama.service (5.3.0+)
     vdevice = VDevice(params)
     vlm = VLM(vdevice, a.hef)
     print(f"model loaded in {time.time() - t0:.1f} s", flush=True)

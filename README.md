@@ -36,6 +36,8 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 
 ## Fresh install, in order
 
+**The short way (new SD card):** flash Raspberry Pi OS 64-bit (trixie) with user `admin`, SSH and Wi-Fi enabled, then from the Mac `ssh-copy-id admin@ml-ai.local && ./deploy.sh`, and on the Pi `~/setup-pi.sh`. The script (`setup-pi.sh` in the repo) does steps 1 to 7 below in order, records each finished stage in `~/.setup-pi.done`, stops twice to ask for a reboot (kernel update, Hailo driver) and continues where it left off when run again. It installs HailoRT 5.3.0 straight away (generic `hailort` packages from Hailo's bucket plus the one-line driver patch for kernel 6.15+, see 2c), not the 5.1.1 that `hailo-h10-all` would bring, and it leaves nothing on the Pi CPU except Vosk, Piper and the embedding model. The long way is the rest of this section.
+
 ### 1. OS, SSH, updates
 
 Flash Raspberry Pi OS 64-bit (trixie) with the Imager, set user `admin`, enable SSH and Wi-Fi. Then:
@@ -57,8 +59,8 @@ Verify after the reboot:
 
 ```
 lspci | grep -i hailo                 # Hailo-10H at 0001:01:00.0
-ls -l /dev/hailo0
-hailortcli fw-control identify        # Firmware 5.2.0, Device Architecture: HAILO10H
+ls -l /dev/h1x-0                      # was /dev/hailo0 up to HailoRT 5.2.0; 5.3.0 renamed it
+hailortcli fw-control identify        # Firmware 5.3.0, Device Architecture: HAILO10H
 ```
 
 A fresh install from the Raspberry Pi repo (checked Oct 12, 2026) gives HailoRT 5.1.1. It pulls in `h10-hailort`, `h10-hailort-pcie-driver`, `python3-h10-hailort`, `hailo-tappas-core` 5.1.0, `hailo-models` 1.0.0 (the `.hef` files in `/usr/share/hailo-models/`), and `rpicam-apps-hailo-postprocess`. Step 2b upgrades it to 5.2.0, which is what this Pi runs now.
@@ -72,6 +74,26 @@ ssh -t admin@ml-ai.local 'sudo dpkg -i ~/hailo520/hailort_5.2.0_arm64.deb ~/hail
 ```
 
 Before upgrading, save the package list so you can roll back: `dpkg -l 'h10*' 'hailo*' > ~/hailo-rollback-5.1.1.txt`. The zoo install replaces `/usr/share/hailo-ollama`, so the models must be pulled again afterwards (step 6). Verify `hailortcli fw-control identify` shows firmware 5.2.0.
+
+### 2c. Upgrade to HailoRT 5.3.0 (sudo, done Oct 19, 2026)
+
+Why: 5.3.0 lets `hailo-ollama` share the HAT with the camera pipeline (`HAILO_OLLAMA_VDEVICE_GROUP_ID`, set in `pi-config/hailo-ollama.service`; `hailonet vdevice-group-id=HAILO_OLLAMA_SHARED` in `run_live.sh` and `compare.sh`). It also adds Qwen3-1.7B and Qwen3-VL-2B. Same procedure as 2b; the packages come from `https://dev-public.hailo.ai/2026_04/Hailo10/`. This Pi runs the generic `hailort` package, so the `hailo-gen-ai-model-zoo` "Depends: hailort" that breaks `hailo-h10-all` installs ([forum report](https://community.hailo.ai/t/bug-report-hailo-gen-ai-model-zoo-5-3-0-uninstallable-on-raspberry-pi-with-hailo-10h/19226)) is satisfied here.
+
+```
+mkdir -p ~/hailo530 && cd ~/hailo530 && for f in hailort_5.3.0_arm64.deb hailort-pcie-driver_5.3.0_all.deb hailo_gen_ai_model_zoo_5.3.0_arm64.deb hailort-5.3.0-cp313-cp313-linux_aarch64.whl; do wget -q https://dev-public.hailo.ai/2026_04/Hailo10/$f; done
+dpkg -l | grep -i hailo > ~/hailo-rollback-5.2.0.txt                     # what was installed, for rollback (5.2.0 debs stay in ~/hailo520)
+ssh -t admin@ml-ai.local 'sudo dpkg -i ~/hailo530/hailort_5.3.0_arm64.deb ~/hailo530/hailort-pcie-driver_5.3.0_all.deb ~/hailo530/hailo_gen_ai_model_zoo_5.3.0_arm64.deb && sudo cp ~/hailo-ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo reboot'   # (sudo); the driver rebuilds through dkms, a few minutes
+```
+
+**The 5.3.0 driver does not build on kernel 6.15+ as shipped:** `linux/vdma/monitor.c` calls `del_timer_sync`, removed from the kernel in 6.15 (renamed `timer_delete_sync` in 6.2). The `dpkg -i` above therefore fails at the driver's post-install (`/var/log/hailort-pcie-driver.deb.log`: "implicit declaration of function 'del_timer_sync'"), leaves the package half-configured, and the `&&` chain stops before the reboot. The 5.2.0 module stays loaded, so nothing breaks yet. Fix the one line and finish the install (tested: the patched driver compiles against 6.18.50; the package's udev rule gives the device node mode 0666, so no group setup is needed):
+
+```
+ssh -t admin@ml-ai.local 'sudo sed -i "s/del_timer_sync(/timer_delete_sync(/" /usr/src/hailort-pcie-driver/linux/vdma/monitor.c && sudo systemctl stop hailo-ollama && sudo dpkg --configure hailort-pcie-driver && sudo cp ~/hailo-ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo reboot'   # (sudo)
+```
+
+Also from the same bucket: `hailo-tappas-core_5.3.0_arm64.deb` (`sudo apt install -y ~/hailo530/hailo-tappas-core_5.3.0_arm64.deb`; apt resolves its -dev dependencies). It turned out not to matter for sharing, `hailonet` lives in HailoRT's own `libgsthailo.so`, but it keeps TAPPAS and HailoRT at the same version. After that apt lists `hailo-models` as auto-removable because the `hailo-h10-all` meta-package is gone: `sudo apt-mark manual hailo-models hailo-tappas-core` and never `apt autoremove` blindly.
+
+After the reboot: `hailortcli fw-control identify` must say 5.3.0; the zoo package resets the model store, so re-pull the models (step 6; about 2 MB/s); reinstall the Python wheel for the VLM (`~/voice/.venv/bin/pip install ~/hailo530/hailort-5.3.0-cp313-cp313-linux_aarch64.whl`) and fetch the 5.3.0 VLM HEF (`wget -O ~/hailo530/Qwen2-VL-2B-Instruct.hef https://dev-public.hailo.ai/v5.3.0/blob/Qwen2-VL-2B-Instruct.hef`). Then `sudo systemctl enable --now hailo-live` and check that a chat works while the camera panel is live.
 
 ### 3. Camera
 
@@ -135,7 +157,7 @@ done
 curl -s http://127.0.0.1:8000/api/tags             # shows what is pulled
 ```
 
-Models land in `/usr/share/hailo-ollama/models/blob/` (both models together about 3.8 GB on 5.2.0). Config is `/etc/xdg/hailo-ollama/hailo-ollama.json`; it binds `0.0.0.0:8000`, so the API is reachable from the LAN. Change `host` to `127.0.0.1` to keep it Pi-only.
+Models land in `/usr/share/hailo-ollama/models/blob/` up to 5.2.0 and in `~/.local/share/hailo-ollama/models/blob/` from 5.3.0 (the three models together about 6 GB; the 5.2.0 blobs are left behind in the old place and can be deleted). On Oct 19, 2026 pulls ran at about 29 MB/s, so a model takes 1–3 minutes; the 2 MB/s seen a week earlier was not the norm. Config is `/etc/xdg/hailo-ollama/hailo-ollama.json`; it binds `0.0.0.0:8000`, so the API is reachable from the LAN. Change `host` to `127.0.0.1` to keep it Pi-only.
 
 ### 6b. CMA memory pool: leave it at the default
 
@@ -206,7 +228,7 @@ Endpoints, for students who want to build on it: `POST /api/chat` (NDJSON stream
 
 ### Everything at boot
 
-Four services, all as user `admin`, all from `pi-config/` (copied to `~` by `deploy.sh`). One sudo command installs the two new ones, moves the web page to port 80 and keeps the user session (PipeWire, USB mic) alive without a login:
+Four services, all as user `admin`, all from `pi-config/` (copied to `~` by `deploy.sh`). One sudo command installs the two new ones, moves the web page to port 80 and keeps the user session (PipeWire, USB mic) alive without a login. All four run together since HailoRT 5.3.0 (Oct 19, 2026); on 5.2.0 `hailo-live` had to stay disabled, see the HAT-sharing note below the table.
 
 ```
 ssh -t admin@ml-ai.local 'sudo cp ~/pi-web.service ~/hailo-live.service ~/voice.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo loginctl enable-linger admin && sudo systemctl enable --now hailo-live voice && sudo systemctl restart pi-web && systemctl --no-pager status hailo-ollama pi-web hailo-live voice | grep -E "service|Active"'   # (sudo)
@@ -216,14 +238,18 @@ ssh -t admin@ml-ai.local 'sudo cp ~/pi-web.service ~/hailo-live.service ~/voice.
 |---|---|---|
 | `hailo-ollama` | LLM server on the HAT | port 8000 |
 | `pi-web` | the page: chat, speak, hold-to-talk, transcript, camera, sources | **http://ml-ai.local/** |
-| `hailo-live` | YOLO11m on the camera, 15 fps; the page's camera panel shows its frames | raw viewer on port 8001 |
+| `hailo-live` | YOLO11m on the camera, 15 fps, sharing the HAT with the LLM (HailoRT Python API, `live_yolo.py`); the page's camera panel shows its frames | raw viewer on port 8001 |
 | `voice` | microphone assistant, wake phrase "hey pi", answers through the PipeWire default sink; its questions and answers appear in the page's transcript | — |
 
 Idle cost, measured Oct 19, 2026 right after enabling: `voice` keeps Vosk transcribing everything the mic hears, about 30% of one core, and `hailo-live` about 10%; the HAT does the detection. Speech that does not start with the wake phrase shows in `journalctl -u voice` as `HEARD:` lines but is not written to the page's transcript and cannot stop the assistant.
 
+**HAT sharing (solved with 5.3.0, Oct 19, 2026).** `hailo-ollama.service` sets `HAILO_OLLAMA_VDEVICE_GROUP_ID=HAILO_OLLAMA_SHARED`; `hailo-live/live_yolo.py` opens its VDevice with the same `group_id` through the HailoRT Python API, so the camera runs at 15 fps while the LLM is loaded and about 5.6 fps while it is generating (the chip is time-sliced), with no effect on the LLM. Two things did not work: the GStreamer `hailonet` element (HailoRT's own plugin, not TAPPAS) still fails with error 74 even with `vdevice-group-id=HAILO_OLLAMA_SHARED`, so `run_live.sh` no longer uses GStreamer (`compare.sh` still does and needs the LLM idle); and releasing a shared VDevice while its model is still configured corrupts the device for every process (kernel: "Trying to enable channels ... already enabled", hailo-ollama 500s until restarted), so `live_yolo.py` closes the model first. The 5.2.0 story, for the record: found after enabling `hailo-live` at boot, `hailo-ollama` releases the device after about five idle minutes ("generation_context: timeout expired") and then cannot get it back while `hailonet` holds it, so every chat returned a 500 ("Failed to create vdevice, there are not enough free devices") and `hailo-ollama` eventually segfaulted (systemd restarted it). The reverse is the same: `hailonet` with `vdevice-group-id=SHARED` or `HAILO_OLLAMA_SHARED` fails with error 74 while the LLM holds the device. The earlier "YOLO works while hailo-ollama runs" result only held because the LLM was idle and had released the device. On 5.2.0 the only option was to keep `hailo-live` disabled and start it by hand when the LLM was not needed.
+
 `hailo-live` holds the camera: `sudo systemctl stop hailo-live` before `rpicam-still` or `vlm_test.py --camera`, and the VLM additionally needs `sudo systemctl stop hailo-ollama`. `voice` and the page both talk to the same hailo-ollama, which handles one request at a time, so a spoken question and a typed one queue behind each other. Logs: `journalctl -u voice -f` (same for the others). To change the wake phrase or the output device, edit `pi-config/voice.service`, `./deploy.sh`, then `sudo cp ~/voice.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart voice`.
 
 ### Live object detection (YOLO11m on the camera)
+
+Since Oct 19, 2026 the live loop is `hailo-live/live_yolo.py` (HailoRT Python API, shares the HAT with the LLM); `run_live.sh` starts it plus the viewer's http server on 8001, `stop_live.sh` stops both. `live_yolo.py --image in.jpg --out out.jpg` runs one image and prints the detections. The GStreamer description below is how it worked up to 5.2.0 and is still what `compare.sh` uses.
 
 ```
 cd ~/hailo-live && ./run_live.sh          # Ctrl-C to stop; from another shell: ~/hailo-live/stop_live.sh
@@ -391,22 +417,25 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - **`hailortcli run` refuses the Hailo-10H.** Use `run2`.
 - **The Python `hailo_platform` API cannot load any `*_h10.hef` on HailoRT 5.1.1** (not re-tested on 5.2.0). `VDevice.configure()` returns `HAILO_NOT_IMPLEMENTED` (error 7) for all of them. Vision models must go through the GStreamer/TAPPAS plugins (`hailonet`, `hailofilter`, `hailooverlay`), which is what every script here does. `hailo_platform.genai` (LLM/VLM/Speech2Text) does work on 5.2.0 with the wheel from "Vision-language model on the HAT".
-- **`hailo-ollama` owns the HAT.** While it runs, `hailortcli monitor`, `run2` and the Python GenAI API all fail with `HAILO_OUT_OF_PHYSICAL_DEVICES` (74). Stop the service first (sudo).
+- **HAT sharing needs the group id.** With 5.3.0 and `HAILO_OLLAMA_VDEVICE_GROUP_ID` set, any HailoRT app that uses `group_id = "HAILO_OLLAMA_SHARED"` (Python `VDevice.create_params()`) shares the HAT with the LLM. Anything else (`hailortcli run2`, `hailonet`, a VDevice with another group) gets `HAILO_OUT_OF_PHYSICAL_DEVICES` (74) while a model is loaded, and if it grabs the device first `hailo-ollama` returns 500s. Only one LLM/VLM can be loaded at a time, so `vlm_test.py` still needs `hailo-ollama` idle or stopped.
+- **hailo-ollama 5.3.0 rejects newlines.** Any message containing `\n` or `\t` returns 500 "Failed to render prompt from JSON strings" (quotes, backslashes, unicode are fine). `assistant.py` flattens whitespace in every message right before sending (`hailo_safe`), which the web app and `rag.py` reuse. This is the "escape character" bug Hailo acknowledged in May 2026.
+- **Never release a shared VDevice while a model is configured on it** (see "Everything at boot"); it takes the HAT down for every process until `hailo-ollama` is restarted.
 - **Never put `cma=` on the kernel command line.** It breaks the firmware mailbox and with it the camera (see 6b).
 - **YOLO11 needs the generic TAPPAS filter.** `hailofilter` with `function-name=yolov8m` hardcodes the `yolov8m/` tensor name; leave `function-name` unset for `yolov11m_h10.hef` and the filter finds the NMS tensor by pattern.
 - **A GStreamer pipeline holds back its last frame.** Feeding one image produces no output; loop it (`multifilesrc loop=true num-buffers=10`) and keep the last file.
 - **`rpicam-vid --post-process-file` recordings have no boxes** (overlay is drawn on the low-res stream, which isn't recorded) and `rpicam-still` with it prints "HailoRT not ready!". Use the TAPPAS pipelines instead.
 - **HDMI audio only exists while a display is connected.** With both HDMI ports disconnected, PipeWire's default sink is "Dummy Output" (silent but succeeds) and `aplay` to HDMI fails with error 524. `assistant.py` prints a one-line `[TTS off …]` notice and carries on in text mode.
-- **`~/.asoundrc` went missing once** between sessions. If `arecord -D usbmic` fails, re-run `deploy.sh`.
+- **The USB mic is opened by card name** (`plughw:CARD=Device,DEV=0`, overridable with `ASSISTANT_MIC`) since Oct 19, 2026, so `~/.asoundrc` (`usbmic`) is only a convenience for typing `arecord -D usbmic`; `raspi-config` and the desktop volume applet rewrite that file, which is why it "went missing" before. After one reboot the mic refused to open ("audio open error: No such file or directory") for seven minutes although the card was enumerated two seconds after boot, so `voice.service` now waits for a successful one-second test capture before starting (`ExecStartPre`) instead of restarting every 5 s (36 restarts that morning).
 - **The 1.5B model invents facts** (it produced a fictional Raspberry Pi "founder"). Ask it things you can verify, and use RAG with real documents for the topic assistant.
 - **Only Hailo zoo models run on the Hailo.** No arbitrary GGUF, no compiling your own LLM to HEF. Embeddings and RAG stay on the CPU.
 - **RAG and the 1.5B model.** Retrieval finds the right pages (see "Answering from documents"), but `qwen2.5:1.5b` still merges neighbouring sentences: asked "what is the AMS?" it answered with the definition of the HMS from the same excerpt, three prompt layouts in a row. Keep questions specific ("how do I load filament into the AMS"), keep answers capped (`LLM_OPTIONS` in `assistant.py`: `num_predict` 120, honoured by hailo-ollama; without it the model ran on for minutes inventing filament acronyms), and check the sources line. Putting the instruction after the excerpts made it worse (it echoed the instruction).
 
 ## Measured so far
 
-- HailoRT and firmware 5.2.0 on this Pi (upgraded Oct 13, 2026; 5.1.1 before that). Verified after the upgrade: `/dev/hailo0` present, PCIe link Gen 3 x1.
+- HailoRT and firmware 5.3.0 on this Pi (5.1.1 → 5.2.0 on Oct 13, 2026 → 5.3.0 on Oct 19). Verified after each upgrade: device node present (`/dev/hailo0` up to 5.2.0, `/dev/h1x-0` from 5.3.0), PCIe link Gen 3 x1.
 - ResNet-50: ~4.1 ms per frame (5.1.1).
-- Live YOLO11m: ~20 annotated frames/s written on 5.1.1; on 5.2.0 (Oct 19, 2026, after the CMA revert) 15.0 frames/s, which is the `framerate=15/1` cap in `run_live.sh`, measured as `latest.jpg` mtime changes over 10 s. `compare.sh` (both YOLO models through TAPPAS) also ran fine on 5.2.0 **while `hailo-ollama` was active**: the GStreamer `hailonet` path shares the HAT, unlike the Python GenAI API.
+- Live YOLO11m: ~20 annotated frames/s on 5.1.1 (GStreamer); 15.0 fps on 5.2.0 and 5.3.0 (the loop's cap). On 5.3.0 through the Python API (`live_yolo.py`, 27–35 ms per inference): 15 fps while the LLM is loaded, 5.6 fps while it generates, measured as `latest.jpg` mtime changes over 10 s.
+- The Python `hailo_platform` vision API works on 5.3.0: `create_infer_model` + `configure` on `yolov11m_h10.hef` (NMS on chip, output is a list of 80 per-class `(n, 5)` arrays: y1, x1, y2, x2, score). It failed with error 7 on 5.1.1.
 - YOLO on a camera still: cup on a table at ~1 ft → "cup 69%" (YOLOv8m); a cup held at the lens was not detected; YOLO11m missed that cup but matched YOLOv8m on people. Four scenes are too few to pick a winner; both models are installed.
 - LLM on 5.1.1: `qwen2.5-instruct:1.5b` ~6.5–7 tokens/s, `qwen2.5-coder:1.5b` ~7.5 tokens/s; first request after a model switch adds ~10 s. On 5.2.0: `qwen2.5:1.5b` 6.8 tok/s, `llama3.2:1b` 8.4 tok/s (wall-clock, 3 runs each; see "Rerun on HailoRT 5.2.0"). CMA 64 MB vs 256 MB: no difference.
 - Qwen2-VL-2B on the Hailo through the Python GenAI API (5.2.0): ~7–7.5 tok/s including the image prefill; accurate descriptions of both a saved photo and a live camera frame (Oct 19, 2026). Model load is 33 s cold (3.1 GB HEF read from the SD card after a reboot) and 7.8 s once the file is in the page cache. It ignores "answer in one sentence" and runs to `--max-tokens` (default 150), so set that for short answers.

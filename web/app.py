@@ -34,7 +34,7 @@ VOICE_DIR = "/home/admin/voice"
 sys.path.insert(0, VOICE_DIR)
 import stt_fix  # noqa: E402
 from assistant import (DEFAULT_MODEL, HISTORY_TURNS, LLM_OPTIONS, LLM_URL, RATE, STT_MODELS,  # noqa: E402
-                       SYSTEM_PROMPT, TRANSCRIPT_LOG, Speaker)
+                       SYSTEM_PROMPT, TRANSCRIPT_LOG, Speaker, hailo_safe)
 from vosk import KaldiRecognizer, Model, SetLogLevel  # noqa: E402
 
 sys.path.insert(0, "/home/admin/rag")
@@ -122,7 +122,7 @@ def chat():
         reply, pending = [], ""
         t0 = time.time()
         try:
-            with requests.post(llm_url, json={"model": model, "messages": messages, "stream": True,
+            with requests.post(llm_url, json={"model": model, "messages": hailo_safe(messages), "stream": True,
                                               "options": LLM_OPTIONS},
                                stream=True, timeout=300) as r:
                 r.raise_for_status()

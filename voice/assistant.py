@@ -51,7 +51,8 @@ STT_MODELS = {
     "small": "/home/admin/voice/model",
     "big": "/home/admin/voice/models/vosk-model-en-us-0.22",
 }
-DEVICE = "usbmic"
+# USB PnP mic by ALSA card name through "plug" (rate/format conversion), so no ~/.asoundrc is needed.
+DEVICE = os.environ.get("ASSISTANT_MIC", "plughw:CARD=Device,DEV=0")
 LLM_URL = "http://127.0.0.1:8000/api/chat"
 DEFAULT_MODEL = "qwen2.5:1.5b"
 PIPER_VOICE = "/home/admin/voice/piper/en_US-lessac-medium.onnx"
@@ -60,6 +61,14 @@ HISTORY_TURNS = 4  # user+assistant pairs kept as context
 # "one or two sentences" once document excerpts are in the prompt, so cap the
 # answer; 120 tokens is about three spoken sentences.
 LLM_OPTIONS = {"num_predict": 120, "temperature": 0.2}
+
+
+def hailo_safe(messages):
+    """hailo-ollama 5.3.0 returns 500 ("Failed to render prompt from JSON strings")
+    when any message contains a newline or tab (checked Oct 19, 2026: quotes,
+    backslashes and unicode are fine). Flatten whitespace right before sending;
+    the stored history keeps the original text."""
+    return [dict(m, content=re.sub(r"[\r\n\t]+", " ", m.get("content", ""))) for m in messages]
 
 # Short answers: the Hailo runs ~7 tokens/s, so long replies feel slow.
 # The transcript hint helps the model read through speech-recognition errors.
@@ -195,7 +204,7 @@ def ask_llm(model, history, question, speaker, retriever=None):
     t0 = time.time()
     first_word = None
     reply, pending = [], ""
-    with requests.post(LLM_URL, json={"model": model, "messages": messages, "stream": True,
+    with requests.post(LLM_URL, json={"model": model, "messages": hailo_safe(messages), "stream": True,
                                       "options": LLM_OPTIONS},
                        stream=True, timeout=300) as r:
         r.raise_for_status()

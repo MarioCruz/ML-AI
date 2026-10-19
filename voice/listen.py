@@ -8,7 +8,7 @@ from vosk import KaldiRecognizer, Model, SetLogLevel
 
 RATE = 16000
 MODEL_DIR = "/home/admin/voice/model"
-DEVICE = "usbmic"
+DEVICE = "plughw:CARD=Device,DEV=0"  # USB PnP mic, no ~/.asoundrc needed
 
 # Phrases the recognizer is allowed to output. Anything else maps to [unk].
 COMMANDS = {

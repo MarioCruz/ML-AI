@@ -10,9 +10,13 @@ Group=admin
 WorkingDirectory=/home/admin/voice
 # Wake phrase so it does not answer every sound in the room; change or drop --wake to taste.
 # --out pw plays through the PipeWire default sink (HDMI or USB speaker when one is present).
+# Wait for the USB mic to be openable (it took ~7 minutes after one boot) instead of
+# crash-looping through Vosk model loads; up to 20 minutes.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 240); do arecord -q -D plughw:CARD=Device,DEV=0 -f S16_LE -r 16000 -c 1 -d 1 /dev/null 2>/dev/null && exit 0; sleep 5; done; echo "USB mic never became available"; exit 1'
+TimeoutStartSec=1300
 ExecStart=/home/admin/voice/.venv/bin/python /home/admin/voice/assistant.py --wake "hey pi" --out pw
 Restart=always
-RestartSec=5
+RestartSec=10
 # PipeWire and the USB mic live in the admin user session; "loginctl enable-linger admin"
 # keeps that session alive at boot without a login.
 Environment=XDG_RUNTIME_DIR=/run/user/1000
