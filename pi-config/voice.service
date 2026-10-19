@@ -1,0 +1,22 @@
+[Unit]
+Description=Pi voice assistant (USB mic -> Vosk -> LLM on the AI HAT+ 2 -> Piper)
+After=network.target sound.target hailo-ollama.service
+Wants=hailo-ollama.service
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/voice
+# Wake phrase so it does not answer every sound in the room; change or drop --wake to taste.
+# --out pw plays through the PipeWire default sink (HDMI or USB speaker when one is present).
+ExecStart=/home/admin/voice/.venv/bin/python /home/admin/voice/assistant.py --wake "hey pi" --out pw
+Restart=always
+RestartSec=5
+# PipeWire and the USB mic live in the admin user session; "loginctl enable-linger admin"
+# keeps that session alive at boot without a login.
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -56,6 +56,10 @@ LLM_URL = "http://127.0.0.1:8000/api/chat"
 DEFAULT_MODEL = "qwen2.5:1.5b"
 PIPER_VOICE = "/home/admin/voice/piper/en_US-lessac-medium.onnx"
 HISTORY_TURNS = 4  # user+assistant pairs kept as context
+# hailo-ollama honours num_predict (checked Oct 19, 2026). The 1.5B models ignore
+# "one or two sentences" once document excerpts are in the prompt, so cap the
+# answer; 120 tokens is about three spoken sentences.
+LLM_OPTIONS = {"num_predict": 120, "temperature": 0.2}
 
 # Short answers: the Hailo runs ~7 tokens/s, so long replies feel slow.
 # The transcript hint helps the model read through speech-recognition errors.
@@ -71,6 +75,14 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 # Every heard question and answer is appended here as one JSON line, so the
 # web page (web/app.py) can show a live transcript of the voice assistant.
 TRANSCRIPT_LOG = "/home/admin/voice/transcript.jsonl"
+
+# Retrieval over ~/rag/docs (rag/rag.py). Used automatically when an index exists.
+RAG_DIR = "/home/admin/rag"
+sys.path.insert(0, RAG_DIR)
+try:
+    import rag  # noqa: E402
+except ImportError:  # fastembed not installed: run without retrieval
+    rag = None
 
 
 def log_event(kind, text):
@@ -171,15 +183,20 @@ def mic_reader(q, speaker, wav_path):
         q.put(None)
 
 
-def ask_llm(model, history, question, speaker):
-    """Stream the reply: print it, and speak each sentence as it completes."""
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [
-        {"role": "user", "content": question}
-    ]
+def ask_llm(model, history, question, speaker, retriever=None):
+    """Stream the reply: print it, and speak each sentence as it completes.
+    With a retriever, the best document excerpts go into the prompt and the
+    sources are printed (not spoken) after the answer."""
+    context, sources = "", []
+    if retriever is not None:
+        context, sources = retriever.context(question)
+    messages = rag.build_messages(SYSTEM_PROMPT, history, question, context) if rag else (
+        [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": question}])
     t0 = time.time()
     first_word = None
     reply, pending = [], ""
-    with requests.post(LLM_URL, json={"model": model, "messages": messages, "stream": True},
+    with requests.post(LLM_URL, json={"model": model, "messages": messages, "stream": True,
+                                      "options": LLM_OPTIONS},
                        stream=True, timeout=300) as r:
         r.raise_for_status()
         print("ASSISTANT: ", end="", flush=True)
@@ -202,7 +219,8 @@ def ask_llm(model, history, question, speaker):
             if chunk.get("done"):
                 break
     speaker.speak(pending)
-    print(f"\n   (first word {first_word or 0:.1f} s, total {time.time() - t0:.1f} s)", flush=True)
+    print(f"\n   (first word {first_word or 0:.1f} s, total {time.time() - t0:.1f} s"
+          f"{'; sources: ' + '; '.join(sources) if sources else ('; no matching document' if retriever else '')})", flush=True)
     return "".join(reply).strip()
 
 
@@ -216,6 +234,7 @@ def main():
     ap.add_argument("--wake", default="", help="wake phrase that must start each request")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--no-tts", action="store_true", help="print replies only, do not speak")
+    ap.add_argument("--no-rag", action="store_true", help="answer from the model alone, ignore ~/rag/docs")
     ap.add_argument("--out", default="pw",
                     help='"pw" (PipeWire default sink), "hdmi", "usb", or an ALSA device name for aplay')
     args = ap.parse_args()
@@ -223,6 +242,11 @@ def main():
 
     speaker = Speaker(enabled=not args.no_tts, out_device=args.out)
     history = []
+    retriever = None
+    if rag and not args.no_rag and rag.Retriever().available:
+        retriever = rag.Retriever().load()
+        print(f"Answering from {len(set(c['doc'] for c in retriever.chunks))} documents in {rag.DOCS_DIR} "
+              f"({len(retriever.chunks)} chunks). --no-rag to turn this off.", flush=True)
 
     if args.text:
         # Keyboard mode: same LLM prompt, history and speech, no Vosk.
@@ -236,7 +260,7 @@ def main():
             if not text or text.lower() in STOP_PHRASES:
                 break
             try:
-                answer = ask_llm(args.model, history, text, speaker)
+                answer = ask_llm(args.model, history, text, speaker, retriever)
             except requests.RequestException as e:
                 print(f"LLM error: {e}", flush=True)
                 continue
@@ -274,20 +298,23 @@ def main():
         if not args.no_fix:
             text = stt_fix.fix(text)
         print(f"HEARD: {text}" + (f"   (raw: {raw})" if text != raw else ""), flush=True)
-        log_event("heard", text)
-        if text in STOP_PHRASES:
-            speaker.speak("Goodbye.")
-            break
         if wake:
+            # Background speech (TV, people in the room) is neither logged to the
+            # page's transcript nor able to stop the assistant: only what follows
+            # the wake phrase counts.
             if not text.startswith(wake):
                 continue
             text = text[len(wake):].strip()
             if not text:
                 continue
+        log_event("heard", text)
+        if text in STOP_PHRASES:
+            speaker.speak("Goodbye.")
+            break
         if args.confirm:
             speaker.speak(f"I heard: {text}.")
         try:
-            answer = ask_llm(args.model, history, text, speaker)
+            answer = ask_llm(args.model, history, text, speaker, retriever)
         except requests.RequestException as e:
             print(f"LLM error: {e}", flush=True)
             speaker.speak("Sorry, I could not reach the language model.")

@@ -33,16 +33,23 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 VOICE_DIR = "/home/admin/voice"
 sys.path.insert(0, VOICE_DIR)
 import stt_fix  # noqa: E402
-from assistant import (DEFAULT_MODEL, HISTORY_TURNS, LLM_URL, RATE, STT_MODELS,  # noqa: E402
+from assistant import (DEFAULT_MODEL, HISTORY_TURNS, LLM_OPTIONS, LLM_URL, RATE, STT_MODELS,  # noqa: E402
                        SYSTEM_PROMPT, TRANSCRIPT_LOG, Speaker)
 from vosk import KaldiRecognizer, Model, SetLogLevel  # noqa: E402
 
-PORT = 8002
+sys.path.insert(0, "/home/admin/rag")
+try:
+    import rag  # noqa: E402
+    retriever = rag.Retriever() if rag.Retriever().available else None
+except ImportError:
+    rag = retriever = None
+
+PORT = int(os.environ.get("PI_WEB_PORT", "8002"))  # pi-web.service sets 80
 CAMERA_FRAME = "/home/admin/hailo-live/live/latest.jpg"
-# LLM servers the page can talk to. Both speak the Ollama API.
+# LLM servers the page can talk to (Ollama API). Only the HAT: nothing runs on the Pi's CPU.
+# To compare against a CPU server again, add e.g. "cpu": "http://127.0.0.1:11434".
 BACKENDS = {
     "hailo": "http://127.0.0.1:8000",   # hailo-ollama: models run on the AI HAT+ 2
-    "cpu": "http://127.0.0.1:11434",    # stock Ollama: models run on the Pi's CPU
 }
 DEFAULT_CHOICE = "hailo|" + DEFAULT_MODEL  # picker value is "<backend>|<model>"
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -100,16 +107,23 @@ def chat():
     if not message:
         return jsonify({"error": "empty message"}), 400
 
+    context, sources = "", []
+    if retriever is not None and not body.get("no_rag"):
+        context, sources = retriever.context(message)
     with history_lock:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history) + [
-            {"role": "user", "content": message}
-        ]
+        if rag:
+            messages = rag.build_messages(SYSTEM_PROMPT, history, message, context)
+        else:
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history) + [
+                {"role": "user", "content": message}
+            ]
 
     def generate():
         reply, pending = [], ""
         t0 = time.time()
         try:
-            with requests.post(llm_url, json={"model": model, "messages": messages, "stream": True},
+            with requests.post(llm_url, json={"model": model, "messages": messages, "stream": True,
+                                              "options": LLM_OPTIONS},
                                stream=True, timeout=300) as r:
                 r.raise_for_status()
                 for line in r.iter_lines():
@@ -137,7 +151,7 @@ def chat():
         with history_lock:
             history.extend([{"role": "user", "content": message}, {"role": "assistant", "content": answer}])
             del history[:-2 * HISTORY_TURNS]
-        yield json.dumps({"done": True, "seconds": round(time.time() - t0, 1)}) + "\n"
+        yield json.dumps({"done": True, "seconds": round(time.time() - t0, 1), "sources": sources}) + "\n"
 
     return Response(generate(), mimetype="application/x-ndjson")
 
@@ -243,7 +257,7 @@ def status():
         for m in models:
             name = m["name"]
             choices.append({"id": f"{backend}|{name}",
-                            "label": f"{name}  ({'AI HAT+ 2' if backend == 'hailo' else 'Pi CPU'})"})
+                            "label": f"{name}  ({'AI HAT+ 2' if backend == 'hailo' else backend})"})
     return jsonify({
         "models": choices,
         "default": DEFAULT_CHOICE,
@@ -251,6 +265,7 @@ def status():
         "llm_models": [c["id"] for c in choices],  # kept for older clients
         "camera": camera_live(),
         "history_turns": len(history) // 2,
+        "rag_docs": sorted(set(c["doc"] for c in retriever.load().chunks)) if retriever else [],
     })
 
 

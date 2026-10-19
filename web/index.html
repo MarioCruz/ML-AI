@@ -43,7 +43,7 @@
 </header>
 <main>
   <section class="panel">
-    <h2>Chat with a local LLM (AI HAT+ 2 or Pi CPU)</h2>
+    <h2>Chat with a local LLM on the AI HAT+ 2</h2>
     <div id="log"></div>
     <div class="opts">
       <label><input type="checkbox" id="speak"> speak replies on the Pi</label>
@@ -110,7 +110,7 @@ async function ask(text) {
         const m = JSON.parse(line);
         if (m.t) { bot.textContent += m.t; log.scrollTop = log.scrollHeight; }
         if (m.error) { bot.textContent += '\n[' + m.error + ']'; }
-        if (m.done) { const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = m.seconds + ' s'; bot.appendChild(meta); }
+        if (m.done) { const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = m.seconds + ' s' + (m.sources && m.sources.length ? ' · from: ' + m.sources.join('; ') : ''); bot.appendChild(meta); }
       }
     }
   } catch (e) {
@@ -192,7 +192,7 @@ pollCam();
       const o = document.createElement('option'); o.value = m.id; o.textContent = m.label; if (m.id === s.default) o.selected = true; modelSel.appendChild(o);
     });
     statusEl.textContent = s.models.length
-      ? 'LLM ready: ' + s.models.length + ' models on ' + s.backends.map(b => b === 'hailo' ? 'AI HAT+ 2' : 'Pi CPU').join(' + ')
+      ? 'LLM ready: ' + s.models.length + ' models on ' + s.backends.map(b => b === 'hailo' ? 'AI HAT+ 2' : b).join(' + ')
       : 'no LLM server reachable';
   } catch (e) { statusEl.textContent = 'status unavailable'; }
 })();

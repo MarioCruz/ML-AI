@@ -1,5 +1,5 @@
 [Unit]
-Description=Pi assistant web UI (Flask, port 8002)
+Description=Pi assistant web UI (Flask) on port 80: http://ml-ai.local/
 After=network.target hailo-ollama.service
 Wants=hailo-ollama.service
 
@@ -13,6 +13,9 @@ ExecStart=/home/admin/voice/.venv/bin/python /home/admin/web/app.py
 # process and systemd starts it again with the new files.
 Restart=always
 RestartSec=3
+# Port 80 needs this capability for a non-root process; the page is then http://ml-ai.local/
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Environment=PI_WEB_PORT=80
 # Audio output for "speak replies": pw (PipeWire default sink), hdmi, usb, or an ALSA device
 Environment=ASSISTANT_OUT=pw
 # PipeWire runs in the admin user session; the service needs its socket

@@ -18,9 +18,11 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 | `hailo-test/compare.sh` | `~/yolo_test/` | YOLOv8m vs YOLO11m side-by-side on a folder of images |
 | `pi-config/asoundrc` | `~/.asoundrc` | Defines the `usbmic` ALSA device |
 | `pi-config/hailo-ollama.service` | `/etc/systemd/system/` **(sudo)** | Runs the LLM server at boot |
-| `web/app.py`, `web/index.html` | `~/web/` | Web front end on port 8002: chat, speak, hold-to-talk, live transcript, camera |
+| `pi-config/hailo-live.service` | `/etc/systemd/system/` **(sudo)** | Runs the live YOLO camera viewer at boot |
+| `pi-config/voice.service` | `/etc/systemd/system/` **(sudo)** | Runs the voice assistant (mic) at boot |
+| `web/app.py`, `web/index.html` | `~/web/` | Web front end on port 80 (http://ml-ai.local/): chat, speak, hold-to-talk, live transcript, camera |
+| `rag/rag.py` | `~/rag/` | Retrieval over the documents in `~/rag/docs/` (index, search, prompt assembly); used by the assistant and the web page |
 | `pi-config/pi-web.service` | `/etc/systemd/system/` **(sudo)** | Runs the web front end at boot |
-| `pi-config/ollama.service` | `/etc/systemd/system/` **(sudo)** | Runs stock Ollama (CPU LLM, port 11434) at boot; optional |
 | `voice/llm_bench.py` | `~/voice/` | CPU-vs-Hailo LLM benchmark (speed, CPU load, saved answers) |
 | `deploy.sh` | — | Copies all of the above to the Pi (everything except the sudo step) |
 
@@ -182,25 +184,44 @@ Options:
 
 ### Web front end
 
-**http://ml-ai.local:8002/** from any device on the network. It runs as the systemd service `pi-web` (installed and verified on Oct 13, 2026; starts at boot after `hailo-ollama`). Manage with `sudo systemctl {status,restart,stop} pi-web`; logs via `journalctl -u pi-web -n 50`. To install it on a fresh Pi (**sudo**):
+**http://ml-ai.local/** from any device on the network (port 80; it was 80 before Oct 19, 2026). It runs as the systemd service `pi-web` (installed Oct 13, 2026, moved to port 80 on Oct 19; starts at boot after `hailo-ollama`). Manage with `sudo systemctl {status,restart,stop} pi-web`; logs via `journalctl -u pi-web -n 50`. To install it on a fresh Pi (**sudo**):
 
 ```
 ssh -t admin@ml-ai.local 'sudo cp ~/pi-web.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pi-web'
 ```
 
-If you ever start it by hand instead (`~/voice/.venv/bin/python ~/web/app.py`), stop that copy before enabling the service: two instances cannot share port 8002, and the service will crash-loop with "Address already in use" until the hand-started one is gone (`pkill -f "^/home/admin/voice/.venv/bin/python app.py"`). After editing `web/app.py` or `index.html`, just run `./deploy.sh`: it copies the files and kills the running app, and the unit's `Restart=always` starts it again with the new code, no sudo needed. (With the earlier `Restart=on-failure` a clean kill left the service stopped; that is why it was changed.)
+If you ever start it by hand instead (`~/voice/.venv/bin/python ~/web/app.py`), stop that copy before enabling the service: two instances cannot share port 80, and the service will crash-loop with "Address already in use" until the hand-started one is gone (`pkill -f "^/home/admin/voice/.venv/bin/python app.py"`). After editing `web/app.py` or `index.html`, just run `./deploy.sh`: it copies the files and kills the running app, and the unit's `Restart=always` starts it again with the new code, no sudo needed. (With the earlier `Restart=on-failure` a clean kill left the service stopped; that is why it was changed.)
 
-The model picker lists every model from both LLM servers, tagged "AI HAT+ 2" (hailo-ollama, port 8000) or "Pi CPU" (stock Ollama, port 11434, see "CPU vs Hailo" below); chat is routed to whichever server owns the chosen model.
+The model picker lists the models pulled into hailo-ollama (port 8000), tagged "AI HAT+ 2". The code can route to more than one Ollama-style server (`BACKENDS` in `web/app.py`); the CPU server used for the "CPU vs Hailo" comparison was removed on Oct 19, 2026, so only the HAT is listed.
 
 What the page does (all against the same pieces the voice assistant uses):
 
 - **Chat**: type a question, the reply streams in from `hailo-ollama` with the same short-answer prompt and 4-turn history as `assistant.py`. A model picker lists what's pulled. "New conversation" clears the history.
 - **Speak replies on the Pi**: when checked, each sentence is spoken through the Pi's audio output (Piper, PipeWire default sink) in order while the text keeps streaming. Set `ASSISTANT_OUT=hdmi|usb|<alsa device>` in the service file to force an output.
-- **Hold to talk**: records on the laptop/phone, sends the audio to the Pi, transcribes it with Vosk (small model) plus `stt_fix.py`, and asks the question. **Browsers only allow mic access on HTTPS or `localhost`**, so over plain `http://ml-ai.local:8002` the button will report "mic not available" in Chrome/Safari. Workarounds: open `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add `http://ml-ai.local:8002`; or run the page over HTTPS with a self-signed certificate (not set up yet). Typing and the Pi's own USB mic are unaffected.
+- **Hold to talk**: records on the laptop/phone, sends the audio to the Pi, transcribes it with Vosk (small model) plus `stt_fix.py`, and asks the question. **Browsers only allow mic access on HTTPS or `localhost`**, so over plain `http://ml-ai.local` the button will report "mic not available" in Chrome/Safari. Workarounds: open `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add `http://ml-ai.local`; or run the page over HTTPS with a self-signed certificate (not set up yet). Typing and the Pi's own USB mic are unaffected.
 - **Voice assistant transcript**: live `HEARD:` / `ANSWER:` lines from `assistant.py` (it appends each to `~/voice/transcript.jsonl`; the page follows that file). Lets a room see what the mic understood.
 - **Camera**: shows the latest YOLO frame while `~/hailo-live/run_live.sh` is running (it checks the frame is under 5 s old).
 
-Endpoints, for students who want to build on it: `POST /api/chat` (NDJSON stream), `POST /api/transcribe` (audio body → `{text, raw}`), `POST /api/speak`, `POST /api/reset`, `GET /api/transcript` (server-sent events), `GET /api/camera`, `GET /api/status`. Needs `flask` in the voice venv (`~/voice/.venv/bin/pip install flask`) and `ffmpeg` (already on the Pi). Ports in use on the Pi: 8000 `hailo-ollama`, 8001 live camera viewer, 8002 this page.
+Endpoints, for students who want to build on it: `POST /api/chat` (NDJSON stream), `POST /api/transcribe` (audio body → `{text, raw}`), `POST /api/speak`, `POST /api/reset`, `GET /api/transcript` (server-sent events), `GET /api/camera`, `GET /api/status`. Needs `flask` in the voice venv (`~/voice/.venv/bin/pip install flask`) and `ffmpeg` (already on the Pi). Ports in use on the Pi: 8000 `hailo-ollama`, 8001 live camera viewer, 80 this page.
+
+### Everything at boot
+
+Four services, all as user `admin`, all from `pi-config/` (copied to `~` by `deploy.sh`). One sudo command installs the two new ones, moves the web page to port 80 and keeps the user session (PipeWire, USB mic) alive without a login:
+
+```
+ssh -t admin@ml-ai.local 'sudo cp ~/pi-web.service ~/hailo-live.service ~/voice.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo loginctl enable-linger admin && sudo systemctl enable --now hailo-live voice && sudo systemctl restart pi-web && systemctl --no-pager status hailo-ollama pi-web hailo-live voice | grep -E "service|Active"'   # (sudo)
+```
+
+| service | what | where |
+|---|---|---|
+| `hailo-ollama` | LLM server on the HAT | port 8000 |
+| `pi-web` | the page: chat, speak, hold-to-talk, transcript, camera, sources | **http://ml-ai.local/** |
+| `hailo-live` | YOLO11m on the camera, 15 fps; the page's camera panel shows its frames | raw viewer on port 8001 |
+| `voice` | microphone assistant, wake phrase "hey pi", answers through the PipeWire default sink; its questions and answers appear in the page's transcript | — |
+
+Idle cost, measured Oct 19, 2026 right after enabling: `voice` keeps Vosk transcribing everything the mic hears, about 30% of one core, and `hailo-live` about 10%; the HAT does the detection. Speech that does not start with the wake phrase shows in `journalctl -u voice` as `HEARD:` lines but is not written to the page's transcript and cannot stop the assistant.
+
+`hailo-live` holds the camera: `sudo systemctl stop hailo-live` before `rpicam-still` or `vlm_test.py --camera`, and the VLM additionally needs `sudo systemctl stop hailo-ollama`. `voice` and the page both talk to the same hailo-ollama, which handles one request at a time, so a spoken question and a typed one queue behind each other. Logs: `journalctl -u voice -f` (same for the others). To change the wake phrase or the output device, edit `pi-config/voice.service`, `./deploy.sh`, then `sudo cp ~/voice.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart voice`.
 
 ### Live object detection (YOLO11m on the camera)
 
@@ -217,6 +238,24 @@ Open `http://ml-ai.local:8001/viewer.html` from any machine on the network. `cap
 ~/yolo_test/compare.sh                                                  # YOLOv8m vs YOLO11m on ~/yolo_test/scenes/*.jpg -> out/<model>/
 hailortcli run2 --measure-overall-latency set-net /usr/share/hailo-models/resnet_v1_50_h10.hef   # latency benchmark
 ```
+
+### Answering from documents (RAG)
+
+The 1.5B models invent facts, so the assistant and the web page answer from the documents in `~/rag/docs/` when an index exists. The LLM stays on the HAT; the only CPU work is a 65 MB sentence-embedding model (`BAAI/bge-small-en-v1.5` through `fastembed`/onnxruntime, in `~/voice/.venv`): about 15 ms per question once loaded, and about 70 s to index the current 253 chunks. No sudo.
+
+```
+~/voice/.venv/bin/pip install fastembed                      # once; pulls onnxruntime, ~65 MB model is downloaded on first use into ~/rag/models/
+cp your.pdf your-notes.md ~/rag/docs/                        # PDF, .txt, .md
+~/voice/.venv/bin/python ~/rag/rag.py build                  # rebuild after adding or removing documents
+~/voice/.venv/bin/python ~/rag/rag.py search "how do I load filament"   # retrieval only: scores, document, page
+~/voice/.venv/bin/python ~/rag/rag.py ask "how do I load filament"      # retrieval + answer from the HAT, with sources
+```
+
+How it works: `pdftotext` splits each PDF into pages; pages are cut into ~180-word chunks (40-word overlap) that remember their file and page; chunks are embedded and stored as a numpy array in `~/rag/index/`. For a question, the top 3 chunks with cosine score ≥ 0.60 go into the user turn ("Document excerpts: ... Question: ...") capped at ~420 words, because hailo-ollama models have a 2048-token context. Below 0.60 nothing is added and the model answers on its own. The conversation history keeps only the plain question, not the excerpts. `assistant.py` prints the sources after each answer (not spoken); the web page shows them under the answer; `--no-rag` or `{"no_rag": true}` turns retrieval off.
+
+Image-only PDFs: pages with no text layer are OCR'd with `tesseract` when it is installed (`sudo apt install tesseract-ocr`, **sudo**); otherwise they are skipped with a warning. Of the first test set (Oct 19, 2026: Bambu Lab H2D manuals and the xTool O1 Omni quick start), the H2D 3D Printing User Manual (163 pages) and the xTool guide have text; the three H2D quick-start guides are pictures and need OCR.
+
+Measured Oct 19, 2026: manual questions score 0.69–0.80 against the right pages, an off-topic question ("president of France") scores 0.41 and gets no excerpts; removing a document and rebuilding removes its pages from every search. Answer quality is limited by the 1.5B model, see the RAG notes in "Gotchas".
 
 ### Vision-language model on the HAT (Qwen2-VL-2B)
 
@@ -253,7 +292,7 @@ curl -s localhost:8000/api/tags | python3 -m json.tool | grep '"name"'     # hai
 ~/yolo_test/compare.sh                                        # 8 "done" lines, boxes in ~/yolo_test/out/*/
 cd ~/hailo-live && ./run_live.sh                              # open http://ml-ai.local:8001/viewer.html, then ~/hailo-live/stop_live.sh
 ~/voice/.venv/bin/python ~/voice/assistant.py --text          # typed question, spoken/printed answer
-curl -s localhost:8002/api/status                             # web UI: both backends listed, "camera": true while run_live.sh runs
+curl -s localhost/api/status                                  # web UI: "backends": ["hailo"], "camera": true while run_live.sh runs
 ```
 
 Vision-language model (the HAT must be free):
@@ -299,9 +338,9 @@ So 5.2.0 matches 5.1.1 for Qwen, the CMA size makes no difference, and Llama 3.2
 - The AI HAT+ 2 is bought for **vision**. For a 1.5B LLM it is ~40% slower per token than the CPU, and no accelerator in this class will beat the Pi's own memory bandwidth by much.
 - The HAT's LLM advantage is that it leaves the CPU **free** (0–3% vs 100%) for Vosk, Piper, the web page and the camera. Whether that makes the voice assistant feel better is still untested: run the LLM on each backend while Vosk transcribes and Piper speaks, and compare.
 - A voice-only topic assistant does not need the HAT. Snapshot-style "what do you see" doesn't either (CPU YOLO ~1 s per frame). Continuous live vision, or vision at the same time as voice, does (HAT, or the cheaper AI Camera/IMX500 with smaller models and no LLM).
-- Both backends stay installed; the web page lists models from both and routes to the right one. `assistant.py` still uses the Hailo by default.
+- Decision (Oct 19, 2026): **nothing runs on the Pi's CPU.** The stock Ollama install, its models and the staged `ollama.service` were deleted (3.1 GB freed). The measurements above stay as the record of why. To repeat the comparison, reinstall it as below and add the `cpu` entry back to `BACKENDS` in `web/app.py`.
 
-**Stock Ollama on the Pi (user-local, no sudo):**
+**Stock Ollama on the Pi, if the comparison is ever re-run (user-local, no sudo; removed Oct 19, 2026):**
 
 ```
 mkdir -p ~/ollama/models && cd ~/ollama
@@ -311,7 +350,7 @@ OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=~/ollama/models OLLAMA_MAX_LOADED_MODE
 OLLAMA_HOST=127.0.0.1:11434 ~/ollama/bin/ollama pull qwen2.5:1.5b                             # 986 MB
 ```
 
-It listens on loopback only. To start it at boot, install `pi-config/ollama.service` (**sudo**): `sudo cp ~/ollama.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ollama`. Re-run the comparison with `~/voice/.venv/bin/python ~/voice/llm_bench.py cpu=http://127.0.0.1:11434,qwen2.5:1.5b hailo=http://127.0.0.1:8000,qwen2.5:1.5b`.
+It listens on loopback only and stops at reboot (no service is kept for it). Re-run the comparison with `~/voice/.venv/bin/python ~/voice/llm_bench.py cpu=http://127.0.0.1:11434,qwen2.5:1.5b hailo=http://127.0.0.1:8000,qwen2.5:1.5b`, then `rm -rf ~/ollama`.
 
 ## Speech recognition accuracy
 
@@ -361,6 +400,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 - **`~/.asoundrc` went missing once** between sessions. If `arecord -D usbmic` fails, re-run `deploy.sh`.
 - **The 1.5B model invents facts** (it produced a fictional Raspberry Pi "founder"). Ask it things you can verify, and use RAG with real documents for the topic assistant.
 - **Only Hailo zoo models run on the Hailo.** No arbitrary GGUF, no compiling your own LLM to HEF. Embeddings and RAG stay on the CPU.
+- **RAG and the 1.5B model.** Retrieval finds the right pages (see "Answering from documents"), but `qwen2.5:1.5b` still merges neighbouring sentences: asked "what is the AMS?" it answered with the definition of the HMS from the same excerpt, three prompt layouts in a row. Keep questions specific ("how do I load filament into the AMS"), keep answers capped (`LLM_OPTIONS` in `assistant.py`: `num_predict` 120, honoured by hailo-ollama; without it the model ran on for minutes inventing filament acronyms), and check the sources line. Putting the instruction after the excerpts made it worse (it echoed the instruction).
 
 ## Measured so far
 
@@ -379,11 +419,10 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 - Live human voice on the mic has not been tested (all tests used WAV files or typed input).
 - **Bootloader EEPROM update** is available (May 2026 installed, Sep 2026 available): `sudo rpi-eeprom-update -a`. Optional.
 - **Reader tips not yet tested:** a systemd `ExecStartPre` delay for hailo-ollama and `HAILO_LOG_LEVEL=info`.
-- **Install the CPU Ollama service (sudo).** The CPU Ollama on port 11434 is still started by hand and stops at reboot. Install `pi-config/ollama.service` as in "CPU vs Hailo".
 
 ## To do
 
-- **RAG with Moonlighter test docs.** Make the assistant answer from real documents instead of inventing facts. Plan: LLM stays on the Hailo via `hailo-ollama`; embeddings and the vector store run on the CPU inside `~/voice/.venv` (no sudo). Steps: collect a few Moonlighter topic docs (markdown/text preferred) into `~/rag/docs/`; chunk and embed with a small sentence-transformers model; store locally (Chroma or a numpy index); add a retrieval step to `assistant.py` that puts the top matching chunks in the prompt; verify answers come from the docs and that removing a doc removes it from retrieval. **Blocked on the test docs from Moonlighter.**
+- **RAG, next steps.** The pipeline is in (see "Answering from documents"). Still to do: install `tesseract-ocr` (sudo) so the three image-only H2D quick-start guides get indexed; add the real Moonlighter lesson documents; decide whether off-topic questions should be refused ("not in my documents") instead of answered from the model's memory.
 
 ## Sources
 
