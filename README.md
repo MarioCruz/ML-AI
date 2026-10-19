@@ -237,7 +237,7 @@ ssh -t admin@ml-ai.local 'sudo systemctl stop hailo-ollama'                     
 ssh -t admin@ml-ai.local 'sudo systemctl start hailo-ollama'                          # (sudo)
 ```
 
-Measured Oct 19, 2026: model load 7.8 s, 12.5 s for a 67-word answer (~7 tok/s including the image prefill), and the description of `cam640.jpg` (a cardboard box corner with a glare spot over a wooden floor) was accurate. The HEF wants 336×336 RGB; the script resizes. Sharing the device between `hailo-ollama` and other apps (`HAILO_OLLAMA_VDEVICE_GROUP_ID`) only arrives with model zoo 5.3.0, which needs HailoRT 5.3.0 and has a [reported broken Pi dependency](https://community.hailo.ai/t/bug-report-hailo-gen-ai-model-zoo-5-3-0-uninstallable-on-raspberry-pi-with-hailo-10h/19226).
+Measured Oct 19, 2026: model load 7.8 s warm, 33 s cold after a reboot; 12.5 s for a 67-word answer (~7 tok/s including the image prefill). The description of `cam640.jpg` (a cardboard box corner with a glare spot over a wooden floor) was accurate, and so was a live `--camera` frame (wooden floor, colorful red/yellow/blue printed object). The model does not respect sentence limits in the prompt; use `--max-tokens` (default 150) to bound the answer. The HEF wants 336×336 RGB; the script resizes. Sharing the device between `hailo-ollama` and other apps (`HAILO_OLLAMA_VDEVICE_GROUP_ID`) only arrives with model zoo 5.3.0, which needs HailoRT 5.3.0 and has a [reported broken Pi dependency](https://community.hailo.ai/t/bug-report-hailo-gen-ai-model-zoo-5-3-0-uninstallable-on-raspberry-pi-with-hailo-10h/19226).
 
 ## Test checklist
 
@@ -369,7 +369,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 - Live YOLO11m: ~20 annotated frames/s written on 5.1.1; on 5.2.0 (Oct 19, 2026, after the CMA revert) 15.0 frames/s, which is the `framerate=15/1` cap in `run_live.sh`, measured as `latest.jpg` mtime changes over 10 s. `compare.sh` (both YOLO models through TAPPAS) also ran fine on 5.2.0 **while `hailo-ollama` was active**: the GStreamer `hailonet` path shares the HAT, unlike the Python GenAI API.
 - YOLO on a camera still: cup on a table at ~1 ft → "cup 69%" (YOLOv8m); a cup held at the lens was not detected; YOLO11m missed that cup but matched YOLOv8m on people. Four scenes are too few to pick a winner; both models are installed.
 - LLM on 5.1.1: `qwen2.5-instruct:1.5b` ~6.5–7 tokens/s, `qwen2.5-coder:1.5b` ~7.5 tokens/s; first request after a model switch adds ~10 s. On 5.2.0: `qwen2.5:1.5b` 6.8 tok/s, `llama3.2:1b` 8.4 tok/s (wall-clock, 3 runs each; see "Rerun on HailoRT 5.2.0"). CMA 64 MB vs 256 MB: no difference.
-- Qwen2-VL-2B on the Hailo through the Python GenAI API (5.2.0): load 7.8 s, ~7 tok/s including the image prefill, accurate description of a test photo.
+- Qwen2-VL-2B on the Hailo through the Python GenAI API (5.2.0): ~7–7.5 tok/s including the image prefill; accurate descriptions of both a saved photo and a live camera frame (Oct 19, 2026). Model load is 33 s cold (3.1 GB HEF read from the SD card after a reboot) and 7.8 s once the file is in the page cache. It ignores "answer in one sentence" and runs to `--max-tokens` (default 150), so set that for short answers.
 - Piper: a 3.1 s sentence took 4.7 s to synthesize including the one-time voice load (the split was not measured); in the assistant, sentences play with no noticeable gap.
 - Voice assistant end to end (WAV in, speech to the dummy sink): first spoken word ~0.5 s after the question, whole 3-sentence answer ~18 s including playback.
 
@@ -377,7 +377,6 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - Audible output has not been heard: no display on HDMI and no USB speaker yet. Plug a monitor/TV into HDMI0 and run `assistant.py`; `wpctl status` should show the HDMI sink.
 - Live human voice on the mic has not been tested (all tests used WAV files or typed input).
-- **`vlm_test.py --camera`** has not been run (needs `hailo-ollama` stopped, which is sudo); only the `--image` path is verified.
 - **Bootloader EEPROM update** is available (May 2026 installed, Sep 2026 available): `sudo rpi-eeprom-update -a`. Optional.
 - **Reader tips not yet tested:** a systemd `ExecStartPre` delay for hailo-ollama and `HAILO_LOG_LEVEL=info`.
 - **Install the CPU Ollama service (sudo).** The CPU Ollama on port 11434 is still started by hand and stops at reboot. Install `pi-config/ollama.service` as in "CPU vs Hailo".
