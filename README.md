@@ -455,6 +455,23 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 - **RAG, next steps.** The pipeline is in (see "Answering from documents") and, since Oct 19, 2026 evening, `tesseract-ocr` is installed and the three image-only H2D quick-start guides are indexed too (360 chunks from 5 documents; the OCR of 108 pages took about 2 minutes). Still to do: add the real Moonlighter lesson documents; decide whether off-topic questions should be refused ("not in my documents") instead of answered from the model's memory.
 
+## Teaching it about local equipment
+
+Two different things, with very different answers.
+
+**Knowledge (the LLM): use the documents, not training.** Nothing can be trained or fine-tuned for the HAT: only Hailo's precompiled models run on it and Hailo publishes no tool to compile an LLM. What the assistant knows about the FabLab's equipment comes from `~/rag/docs/` ("Answering from documents"): manuals, lesson notes, a markdown file of house rules. Copy files in, run `~/voice/.venv/bin/python ~/rag/rag.py build`, and it answers from them with page citations. Students can do this without sudo. Pause the voice and camera services during the rebuild until the 5 A supply is in (Gotchas).
+
+**Recognising the equipment (the camera): a custom YOLO, compiled for the Hailo-10H.** The detector knows the 80 COCO classes (person, cup, laptop ...), not "H2D printer" or "xTool". Training your own detector is a real project, roughly a weekend for someone comfortable with Python; the compile step is where people get stuck.
+
+1. **Photos and labels.** A few hundred photos of each machine from different angles, distances and lighting, with boxes drawn around them. [Roboflow](https://roboflow.com) is the usual tool and exports straight to YOLO format. This is the students' part.
+2. **Train.** YOLOv8n/s or YOLO11n/s with [Ultralytics](https://docs.ultralytics.com) on the Mac (an hour or two for a small model) or free on Google Colab. Not on the Pi. Small models only: the HAT runs `yolov11m` at 15 fps now; a nano/small model is faster and easier to compile.
+3. **Compile to a HEF.** The awkward step. Hailo's Dataflow Compiler (DFC) is x86-64 Linux only, downloaded from the [Developer Zone](https://hailo.ai/developer-zone/), and the Hailo-10H needs its own DFC package, not the common Hailo-8 one (the Hailo-8 CLI rejects `--hw-arch hailo10h`). It needs a Linux PC, a cloud VM or an x86 Docker container, not the Mac; a calibration set of a few hundred representative images (Ultralytics recommends ~1,000 for production accuracy; INT8 only); and a DFC version that matches the HailoRT on the Pi (5.3.0: a HEF compiled for another version fails with `HAILO_NOT_IMPLEMENTED`). The community pattern is `hailomz compile yolov8s --hw-arch hailo10h --ckpt model.onnx --calib-path calib/ --yaml yolov8s.yaml --classes N`. Ultralytics 8.4.97 reportedly added direct Hailo-10H HEF export (`yolo export format=hailo`), unverified here, and still x86.
+4. **Deploy.** `scp model.hef admin@ml-ai.local:~/hailo-live/` then in `hailo-live/live_yolo.py` set `HEF` to it and replace the `COCO` tuple with your class names in training order; `./deploy.sh` and the service picks it up. The NMS runs on the chip, so the output format does not change. Test first with `live_yolo.py --image photo.jpg --out out.jpg`.
+
+**The shortcut that needs no training:** the vision-language model (`vlm_test.py`) already recognises "a 3D printer" or "a laser cutter" from a camera frame because it understands open vocabulary. It cannot run while the chat LLM is loaded (one generative model at a time on the HAT), so it is a demo, not a live feature.
+
+Sources: [custom HEF with DFC and model zoo](https://community.hailo.ai/t/creating-custom-hef-using-dfc-model-zoo/739), [training with Roboflow](https://community.hailo.ai/t/training-with-roboflow/19190), [YOLOv8 ONNX to HEF](https://community.hailo.ai/t/converting-yolov8n-onnx-to-hef-on-windows/17835), [YOLO on RPi5 Hailo-10H](https://github.com/MichalAnatolSkora/yolo-on-rpi5-hailo10h), [Ultralytics 8.4.97 notes](https://newreleases.io/project/pypi/ultralytics/release/8.4.97).
+
 ## Sources
 
 - [Raspberry Pi AI software docs](https://www.raspberrypi.com/documentation/computers/ai.html) — Hailo driver and LLM install steps
