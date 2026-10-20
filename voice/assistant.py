@@ -63,6 +63,32 @@ HISTORY_TURNS = 4  # user+assistant pairs kept as context
 LLM_OPTIONS = {"num_predict": 120, "temperature": 0.2}
 
 
+CAMERA_JSON = "/home/admin/hailo-live/live/latest.json"
+CAMERA_WORDS = re.compile(r"\b(camera|see|seeing|look|looking|watch|watching|in front of you|what is this|what's this|"
+                          r"recognize|recognise|detect)\b", re.I)
+
+
+def camera_context(question):
+    """If the question is about the camera and the live detector wrote something in the
+    last 5 s, describe it: 'The camera currently sees: person (92%), cup (69%).'"""
+    if not CAMERA_WORDS.search(question):
+        return ""
+    try:
+        with open(CAMERA_JSON) as f:
+            d = json.load(f)
+        if time.time() - d.get("ts", 0) > 5:
+            return "The camera is not running right now."
+    except (OSError, ValueError):
+        return "The camera is not running right now."
+    seen = {}
+    for det in d.get("detections", []):
+        seen[det["label"]] = max(seen.get(det["label"], 0), det["score"])
+    if not seen:
+        return "The camera is on but currently detects no known objects."
+    return "The camera currently sees: " + ", ".join(
+        f"{label} ({int(score * 100)}%)" for label, score in sorted(seen.items(), key=lambda x: -x[1])) + "."
+
+
 def hailo_safe(messages):
     """hailo-ollama 5.3.0 returns 500 ("Failed to render prompt from JSON strings")
     when any message contains a newline or tab (checked Oct 19, 2026: quotes,
@@ -197,10 +223,16 @@ def ask_llm(model, history, question, speaker, retriever=None):
     With a retriever, the best document excerpts go into the prompt and the
     sources are printed (not spoken) after the answer."""
     context, sources = "", []
-    if retriever is not None:
-        context, sources = retriever.context(question)
-    messages = rag.build_messages(SYSTEM_PROMPT, history, question, context) if rag else (
-        [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": question}])
+    cam = camera_context(question)
+    if cam:
+        sources = ["camera"]
+        question_for_llm = f"{cam} Question: {question}"
+    else:
+        question_for_llm = question
+        if retriever is not None:
+            context, sources = retriever.context(question)
+    messages = rag.build_messages(SYSTEM_PROMPT, history, question_for_llm, context) if rag else (
+        [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": question_for_llm}])
     t0 = time.time()
     first_word = None
     reply, pending = [], ""

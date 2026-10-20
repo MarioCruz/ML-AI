@@ -34,7 +34,7 @@ VOICE_DIR = "/home/admin/voice"
 sys.path.insert(0, VOICE_DIR)
 import stt_fix  # noqa: E402
 from assistant import (DEFAULT_MODEL, HISTORY_TURNS, LLM_OPTIONS, LLM_URL, RATE, STT_MODELS,  # noqa: E402
-                       SYSTEM_PROMPT, TRANSCRIPT_LOG, Speaker, hailo_safe)
+                       SYSTEM_PROMPT, TRANSCRIPT_LOG, Speaker, camera_context, hailo_safe)
 from vosk import KaldiRecognizer, Model, SetLogLevel  # noqa: E402
 
 sys.path.insert(0, "/home/admin/rag")
@@ -108,14 +108,20 @@ def chat():
         return jsonify({"error": "empty message"}), 400
 
     context, sources = "", []
-    if retriever is not None and not body.get("no_rag"):
-        context, sources = retriever.context(message)
+    cam = camera_context(message)
+    if cam:
+        sources = ["camera"]
+        message_for_llm = f"{cam} Question: {message}"
+    else:
+        message_for_llm = message
+        if retriever is not None and not body.get("no_rag"):
+            context, sources = retriever.context(message)
     with history_lock:
         if rag:
-            messages = rag.build_messages(SYSTEM_PROMPT, history, message, context)
+            messages = rag.build_messages(SYSTEM_PROMPT, history, message_for_llm, context)
         else:
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history) + [
-                {"role": "user", "content": message}
+                {"role": "user", "content": message_for_llm}
             ]
 
     def generate():

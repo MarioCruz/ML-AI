@@ -15,6 +15,7 @@ Usage:
   live_yolo.py --image in.jpg --out out.jpg   # one image, prints the detections
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -27,6 +28,7 @@ HEF = "/usr/share/hailo-models/yolov11m_h10.hef"
 GROUP = "HAILO_OLLAMA_SHARED"   # must match HAILO_OLLAMA_VDEVICE_GROUP_ID in hailo-ollama.service
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "live", "latest.jpg")
+OUT_JSON = os.path.join(HERE, "live", "latest.json")  # what the camera sees, for the chat
 SIZE = 640
 CAM_W, CAM_H = 640, 480
 PAD_TOP = (SIZE - CAM_H) // 2
@@ -70,6 +72,16 @@ def write_atomic(path, bgr):
     with open(tmp, "wb") as f:
         f.write(data.tobytes())
     os.replace(tmp, path)  # readers never see a half-written frame
+
+
+def write_detections(found):
+    """live/latest.json: [{"label": "cup", "score": 0.69, "box": [x1, y1, x2, y2]}, ...]"""
+    tmp = OUT_JSON + ".part"
+    with open(tmp, "w") as f:
+        json.dump({"ts": time.time(),
+                   "detections": [{"label": l, "score": round(s, 2), "box": [x1, y1, x2, y2]}
+                                  for l, s, x1, y1, x2, y2 in found]}, f)
+    os.replace(tmp, OUT_JSON)
 
 
 def main():
@@ -127,6 +139,7 @@ def main():
                 canvas[PAD_TOP:PAD_TOP + CAM_H] = frame[:, :, ::-1]  # picamera2 RGB888 is BGR order
                 found = infer(canvas)
                 write_atomic(OUT, draw(canvas, found))
+                write_detections(found)
                 n += 1
                 if time.time() - t_report >= 10:
                     print(f"{n / (time.time() - t_report):.1f} fps, last: "
