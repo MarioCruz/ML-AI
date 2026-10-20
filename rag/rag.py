@@ -46,6 +46,11 @@ RAG_INSTRUCTIONS = (
     "say you do not know; do not guess. Mention the document name when it helps."
 )
 
+# Threads for the embedding model. Indexing with all 4 cores at 100% on top of the
+# camera, mic and HAT workloads browned out the Pi 5 once (vcgencmd get_throttled
+# 0x50000: under-voltage occurred) and it reset. 2 threads keeps the peak lower;
+# queries are a single sentence and do not care.
+EMBED_THREADS = int(os.environ.get("RAG_THREADS", "2"))
 _model = None
 
 
@@ -53,7 +58,7 @@ def embedder():
     global _model
     if _model is None:
         from fastembed import TextEmbedding
-        _model = TextEmbedding(MODEL_NAME, cache_dir=MODEL_DIR)
+        _model = TextEmbedding(MODEL_NAME, cache_dir=MODEL_DIR, threads=EMBED_THREADS)
     return _model
 
 

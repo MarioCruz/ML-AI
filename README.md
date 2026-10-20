@@ -151,7 +151,7 @@ Pull the models (about 1.5–2 MB/s here, so 15–20 minutes each). Pull them ag
 
 ```
 curl -s http://127.0.0.1:8000/hailo/v1/list        # zoo (5.2.0): qwen2.5:1.5b, qwen2.5-coder:1.5b, qwen2:1.5b, llama3.2:1b, deepseek_r1:1.5b
-for m in qwen2.5:1.5b qwen2.5-coder:1.5b; do
+for m in qwen2.5:1.5b llama3.2:1b; do           # qwen2.5-coder was pulled for the benchmark and deleted on Oct 19, 2026 to free 1.7 GB
   curl -s http://127.0.0.1:8000/api/pull -H 'Content-Type: application/json' -d "{\"model\": \"$m\", \"stream\": true}" | tail -c 200; echo
 done
 curl -s http://127.0.0.1:8000/api/tags             # shows what is pulled
@@ -201,7 +201,7 @@ Options:
 - `--no-tts` print only
 - `--wav file.wav` feed a 16 kHz mono 16-bit WAV instead of the mic
 - `--wake "hey pi"` only answer utterances that start with the phrase
-- `--model qwen2.5-coder:1.5b` use another pulled model (switching models costs ~10 s on the Hailo; only one is loaded at a time)
+- `--model llama3.2:1b` use another pulled model (switching models costs ~10 s on the Hailo; only one is loaded at a time)
 - `--out pw|hdmi|usb|DEVICE` where to play: `pw` (default) uses PipeWire's current default sink; `hdmi` / `usb` force that output through `aplay`; anything else is an ALSA device name
 
 ### Web front end
@@ -281,7 +281,7 @@ How it works: `pdftotext` splits each PDF into pages; pages are cut into ~180-wo
 
 Image-only PDFs: pages with no text layer are OCR'd with `tesseract` when it is installed (`sudo apt install tesseract-ocr`, **sudo**); otherwise they are skipped with a warning. Of the first test set (Oct 19, 2026: Bambu Lab H2D manuals and the xTool O1 Omni quick start), the H2D 3D Printing User Manual (163 pages) and the xTool guide have text; the three H2D quick-start guides are pictures and need OCR.
 
-Measured Oct 19, 2026: manual questions score 0.69–0.80 against the right pages, an off-topic question ("president of France") scores 0.41 and gets no excerpts; removing a document and rebuilding removes its pages from every search. Answer quality is limited by the 1.5B model, see the RAG notes in "Gotchas".
+Rebuilding with all services running browned out the 3 A power supply once (see Gotchas), so a rebuild is best done with the voice and camera services paused (`kill -STOP`/`-CONT` on their PIDs, no sudo) and `RAG_THREADS=2`, which took 106 s for the embedding of 360 chunks. Measured Oct 19, 2026: manual questions score 0.69–0.80 against the right pages, an OCR'd page ("Install the AMS 2 Pro", AMS Combo guide p.21) is retrieved for an AMS installation question, an off-topic question ("president of France") scores 0.41 and gets no excerpts; removing a document and rebuilding removes its pages from every search. Answer quality is limited by the 1.5B model, see the RAG notes in "Gotchas".
 
 ### Vision-language model on the HAT (Qwen2-VL-2B)
 
@@ -392,7 +392,7 @@ Free-form recognition is the weak link: the original `listen.py` only had to pic
 
 What the errors were: almost all on this project's own words, which general English models don't know: "pi"→"pie", "AI HAT"→"i had / all you had", "three"→"free", "sensors"→"senses". So the fix with the best return is **`voice/stt_fix.py`**: a short list of regex corrections for exactly the mistakes seen in testing, applied to every transcript (`--no-fix` disables it). Students can add their topic's words there. The system prompt also tells the LLM the text came from speech recognition, and `--confirm` reads back what was heard.
 
-The big model is installed at `~/voice/models/vosk-model-en-us-0.22` (`--stt-model big`) but gives no accuracy gain once the corrections are on, and in one run its 2.7 GB load pushed the LLM's first response from 0.5 s to 32 s. Delete it with `rm -r ~/voice/models/vosk-model-en-us-0.22` to free the space if you don't need it. The lgraph model is at `~/voice/models/vosk-model-en-us-0.22-lgraph` and can be deleted too.
+The big model was installed at `~/voice/models/vosk-model-en-us-0.22` (`--stt-model big`; deleted Oct 19, 2026 with the lgraph model to free 2.9 GB, re-download from the Vosk models page to repeat the benchmark) but gives no accuracy gain once the corrections are on, and in one run its 2.7 GB load pushed the LLM's first response from 0.5 s to 32 s. Delete it with `rm -r ~/voice/models/vosk-model-en-us-0.22` to free the space if you don't need it. The lgraph model is at `~/voice/models/vosk-model-en-us-0.22-lgraph` and can be deleted too.
 
 Re-run the measurement after changing models or `stt_fix.py` (the test set lives in `~/voice/sttset/`; regenerate it on the Mac with `say -v <voice> -o f.aiff "<text>" && afconvert -f WAVE -d LEI16@16000 -c 1 f.aiff f.wav`, one `file.wav|transcript` line per file in `manifest.txt`):
 
@@ -420,6 +420,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 - **HAT sharing needs the group id.** With 5.3.0 and `HAILO_OLLAMA_VDEVICE_GROUP_ID` set, any HailoRT app that uses `group_id = "HAILO_OLLAMA_SHARED"` (Python `VDevice.create_params()`) shares the HAT with the LLM. Anything else (`hailortcli run2`, `hailonet`, a VDevice with another group) gets `HAILO_OUT_OF_PHYSICAL_DEVICES` (74) while a model is loaded, and if it grabs the device first `hailo-ollama` returns 500s. Only one LLM/VLM can be loaded at a time, so `vlm_test.py` still needs `hailo-ollama` idle or stopped.
 - **hailo-ollama 5.3.0 rejects newlines.** Any message containing `\n` or `\t` returns 500 "Failed to render prompt from JSON strings" (quotes, backslashes, unicode are fine). `assistant.py` flattens whitespace in every message right before sending (`hailo_safe`), which the web app and `rag.py` reuse. This is the "escape character" bug Hailo acknowledged in May 2026.
 - **Never release a shared VDevice while a model is configured on it** (see "Everything at boot"); it takes the HAT down for every process until `hailo-ollama` is restarted.
+- **The power supply must be the 5 A one.** On Oct 19, 2026 the Pi reset in the middle of a RAG index build: `vcgencmd get_throttled` showed `0x50000` (under-voltage occurred, throttling occurred) and `/proc/device-tree/chosen/power/max_current` reads 3000 mA, so the supply in use only advertises 3 A over USB-PD. The Pi 5 with the HAT, camera, mic and four busy cores needs the official 27 W / 5 A supply. Brownout resets also corrupt the SD card (two first-boot corruptions on a new card that afternoon). Until the supply is replaced, `rag.py build` runs its embedding on 2 threads (`RAG_THREADS`) and heavy jobs should run with the voice and camera services paused.
 - **Never put `cma=` on the kernel command line.** It breaks the firmware mailbox and with it the camera (see 6b).
 - **YOLO11 needs the generic TAPPAS filter.** `hailofilter` with `function-name=yolov8m` hardcodes the `yolov8m/` tensor name; leave `function-name` unset for `yolov11m_h10.hef` and the filter finds the NMS tensor by pattern.
 - **A GStreamer pipeline holds back its last frame.** Feeding one image produces no output; loop it (`multifilesrc loop=true num-buffers=10`) and keep the last file.
@@ -451,7 +452,7 @@ Re-run the measurement after changing models or `stt_fix.py` (the test set lives
 
 ## To do
 
-- **RAG, next steps.** The pipeline is in (see "Answering from documents"). Still to do: install `tesseract-ocr` (sudo) so the three image-only H2D quick-start guides get indexed; add the real Moonlighter lesson documents; decide whether off-topic questions should be refused ("not in my documents") instead of answered from the model's memory.
+- **RAG, next steps.** The pipeline is in (see "Answering from documents") and, since Oct 19, 2026 evening, `tesseract-ocr` is installed and the three image-only H2D quick-start guides are indexed too (360 chunks from 5 documents; the OCR of 108 pages took about 2 minutes). Still to do: add the real Moonlighter lesson documents; decide whether off-topic questions should be refused ("not in my documents") instead of answered from the model's memory.
 
 ## Sources
 
