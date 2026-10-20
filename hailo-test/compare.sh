@@ -2,6 +2,11 @@
 # Run every scene through YOLOv8m and YOLO11m on the Hailo-10H with the same
 # settings. Each scene is letterboxed to 640x640 first (same as the live
 # pipeline). Output: out/<model>/<scene>.jpg with boxes and labels drawn.
+#
+# Uses the GStreamer hailonet element, which cannot join the HAT's shared
+# group: it fails with error 74 while hailo-ollama has a model loaded. Run it
+# when the LLM has been idle for 5 minutes or after `sudo systemctl stop
+# hailo-ollama`. (live_yolo.py is the Python path that does share the HAT.)
 set -euo pipefail
 cd "$(dirname "$0")"
 POST=/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libyolo_hailortpp_post.so

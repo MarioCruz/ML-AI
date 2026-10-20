@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Head-to-head LLM benchmark: the same prompts against two Ollama-compatible
-backends, e.g. stock Ollama on the Pi's CPU (:11434) and hailo-ollama on the
-AI HAT+ 2 (:8000). Method follows the-diy-life.com's March 2026 test:
+LLM benchmark: the same prompts against one or more Ollama-compatible backends,
+normally just hailo-ollama on the AI HAT+ 2 (:8000); a CPU Ollama (:11434) was
+the comparison in Oct 2026 and has since been removed from the Pi. Method follows the-diy-life.com's March 2026 test:
 temperature 0, fixed seed, a "hello" warm-up, 3 prompts x 3 runs, tokens/s
 from the API's own timing when available (Ollama reports eval_duration;
 hailo-ollama does not, so wall time is used there and marked).
@@ -11,8 +11,8 @@ Also samples CPU load during each run, because the voice assistant needs the
 CPU for Vosk and Piper while the LLM generates.
 
 Usage:
-  ~/voice/.venv/bin/python ~/voice/llm_bench.py \
-      cpu=http://127.0.0.1:11434,qwen2.5:1.5b  hailo=http://127.0.0.1:8000,qwen2.5:1.5b
+  ~/voice/.venv/bin/python ~/voice/llm_bench.py hailo=http://127.0.0.1:8000,qwen2.5:1.5b
+  (add cpu=http://127.0.0.1:11434,qwen2.5:1.5b to compare against a CPU Ollama)
 Writes llm_bench_results.json and llm_bench_answers.md next to this script.
 """
 import json

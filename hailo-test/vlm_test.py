@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Ask Qwen2-VL-2B on the AI HAT+ 2 a question about an image, through the
-HailoRT 5.2.0 Python GenAI API (hailo_platform.genai.VLM). hailo-ollama cannot
-serve VLMs, so this is the only path to the vision model on the HAT.
+HailoRT Python GenAI API (hailo_platform.genai.VLM). hailo-ollama cannot serve
+VLMs, so this is the only path to the vision model on the HAT.
 
-Needs: ~/voice/.venv with the hailort-5.2.0 cp313 wheel and opencv-python-headless,
-and the HEF from https://dev-public.hailo.ai/v5.2.0/blob/Qwen2-VL-2B-Instruct.hef.
-The HAT is exclusive: if hailo-ollama holds it you get HAILO_OUT_OF_PHYSICAL_DEVICES
-(stop it with `sudo systemctl stop hailo-ollama` first).
+Needs: ~/voice/.venv with the hailort cp313 wheel matching the installed HailoRT
+(5.3.0) and opencv-python-headless, and the HEF for the same version from
+https://dev-public.hailo.ai/v5.3.0/blob/Qwen2-VL-2B-Instruct.hef (3.2 GB).
+Only one generative model can be loaded on the HAT, so stop the LLM first
+(`sudo systemctl stop hailo-ollama`), and stop hailo-live before --camera.
 
 Usage:
   ~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --image photo.jpg [--prompt "..."]

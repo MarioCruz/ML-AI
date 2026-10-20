@@ -10,12 +10,13 @@ WorkingDirectory=/home/admin
 ExecStart=/usr/bin/hailo-ollama
 Restart=on-failure
 RestartSec=3
-# HailoRT/zoo 5.3.0+: share the HAT with the camera pipeline (hailonet
-# vdevice-group-id) and other HailoRT apps that use the same group id.
-# Ignored by 5.2.0. Only one LLM/VLM can be loaded at a time regardless.
+# HailoRT/zoo 5.3.0+: share the HAT with other HailoRT apps that open their
+# VDevice with this group id (hailo-live/live_yolo.py does). Only one LLM/VLM
+# can be loaded at a time regardless.
 Environment=HAILO_OLLAMA_VDEVICE_GROUP_ID=HAILO_OLLAMA_SHARED
-# Models are stored in /usr/share/hailo-ollama/models (blob dir owned by admin).
-# Config: /etc/xdg/hailo-ollama/hailo-ollama.json
+# Models are stored in ~/.local/share/hailo-ollama/models (5.3.0+). Port and
+# bind address come from OLLAMA_HOST (default 0.0.0.0:8000); the old
+# hailo-ollama.json config file is gone since 5.3.0.
 
 [Install]
 WantedBy=multi-user.target

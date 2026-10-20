@@ -4,7 +4,10 @@ Voice -> LLM -> voice assistant for the Pi.
 
 Listens on the USB mic with Vosk (offline speech to text), sends what it hears
 to hailo-ollama (the LLM on the AI HAT+ 2), and speaks the reply with Piper
-(offline text to speech) through the default audio output.
+(offline text to speech) through the default audio output. When an index exists
+in ~/rag/index the best document excerpts go into the prompt (rag/rag.py) and
+the sources are printed; a question about the camera gets the live detector's
+current list instead (camera_context). Runs at boot as voice.service.
 
 The LLM reply is streamed; each sentence is spoken as soon as it is complete,
 so the first words come out before the whole answer is generated. While the
@@ -16,6 +19,10 @@ Usage:
   ~/voice/.venv/bin/python ~/voice/assistant.py --text       # type questions instead of speaking
   options: --wake "hey pi"     only answer utterances that start with this phrase
            --model NAME        hailo-ollama model (default qwen2.5:1.5b)
+           --no-rag            ignore ~/rag/docs, answer from the model alone
+           --confirm           say "I heard: ..." before answering
+           --no-fix            disable the vocabulary corrections in stt_fix.py
+           --stt-model small|big|DIR
            --no-tts            print only, do not speak
            --out pw|hdmi|usb|DEVICE
                                "pw" (default) plays via pw-play to PipeWire's default sink

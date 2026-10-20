@@ -44,8 +44,8 @@ if ! done_ apt; then
   sudo apt install -y dkms build-essential linux-headers-rpi-2712 git curl unzip ffmpeg \
       poppler-utils tesseract-ocr python3-venv python3-dev python3-picamera2 hailo-models
   # hailo-models = the vision HEFs in /usr/share/hailo-models (yolov8m_h10, yolov11m_h10, resnet ...).
-  # NOT hailo-h10-all / hailo-tappas-core from apt: they bring HailoRT 5.1.1 and TAPPAS 5.1.0; the
-  # 5.3.0 versions come from Hailo's bucket in stage 3 (TAPPAS 5.1.0's hailonet cannot share the HAT).
+  # NOT hailo-h10-all / hailo-tappas-core from apt: they bring HailoRT 5.1.1 and TAPPAS 5.1.0;
+  # the 5.3.0 versions come from Hailo's bucket in stage 3.
   mark apt
   newest=$(ls -1 /lib/modules | sort -V | tail -1)
   [ "$newest" = "$(uname -r)" ] || need_reboot "Kernel updated ($(uname -r) -> $newest)"
@@ -144,7 +144,7 @@ fi
 say "Checks"
 grep CmaTotal /proc/meminfo
 rpicam-hello --list-cameras 2>/dev/null | grep -m1 imx708 || echo "camera not listed (is it connected?)"
-arecord -D usbmic -f S16_LE -r 16000 -c 1 -d 1 /tmp/mic.wav 2>/dev/null && echo "USB mic ok" || echo "USB mic not found (~/.asoundrc, README 4)"
+arecord -D plughw:CARD=Device,DEV=0 -f S16_LE -r 16000 -c 1 -d 1 /tmp/mic.wav 2>/dev/null && echo "USB mic ok" || echo "USB mic not found (is the USB PnP Sound Device plugged in?)"
 systemctl is-active hailo-ollama pi-web voice hailo-live | paste -sd' ' | sed 's/^/services: /'
 curl -s -m 5 http://127.0.0.1/api/status | head -c 200; echo
 say "Done. Page: http://ml-ai.local/   Checklist: README.md 'Test checklist'"

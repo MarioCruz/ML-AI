@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Web front end for the Pi assistant. Runs on port 8002.
+Web front end for the Pi assistant. Runs on port 80 as the pi-web service (PI_WEB_PORT).
 
-  http://<pi-ip>:8002/
+  http://ml-ai.local/
 
 - Chat: text in, streamed reply out, from the LLM on the AI HAT+ 2 (hailo-ollama).
   Same system prompt and history rules as voice/assistant.py.
