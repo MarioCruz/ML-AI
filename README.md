@@ -14,7 +14,7 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 | Path | Goes to (on the Pi) | What it is |
 |---|---|---|
 | `setup-pi.sh` | `~/` | From-scratch installer for a new SD card (staged, re-runnable, two reboots) |
-| `deploy.sh` | — | Copies everything below to its place on the Pi and restarts the services that need it (no sudo). Run it from the Mac (`./deploy.sh`) or on the Pi from the clone (`./deploy.sh --local`) |
+| `deploy.sh` | — | Copies everything below to its place on the Pi and restarts the services that need it (no sudo). On the Pi: `~/ML-AI/deploy.sh --local`; from a Mac: `./deploy.sh` |
 | `voice/assistant.py` | `~/voice/` | Voice assistant: USB mic → Vosk → LLM on the HAT (+ documents, camera) → Piper |
 | `voice/stt_fix.py` | `~/voice/` | Vocabulary corrections for every transcript ("pie"→"pi", "i had"→"ai hat", ...) |
 | `voice/stt_bench.py`, `voice/llm_bench.py` | `~/voice/` | Speech-recognition and LLM benchmarks (see History) |
@@ -39,31 +39,31 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 
 ### Quick start (on the Pi, no computer needed)
 
-Written for students: every step says what it does and why, so you learn how a computer gets set up while you set one up. Type each command into the Pi's **terminal** (the black window where you type commands). If a command asks for a password, it is the `admin` password; the screen shows nothing while you type it, that is normal.
+Written for students: every step says what it does and why, so you learn how a computer gets set up while you set one up. Type each command into the Pi's **terminal** (the black window where you type commands: the `>_` icon in the top bar, or Ctrl+Alt+T). Press Enter after each one. If a command asks for a password, it is the `admin` password; the screen shows nothing while you type it, that is normal. Downloads make up most of the time: plan on about an hour, more on slow Wi-Fi.
 
-1. **Flash the SD card.** The SD card is the Pi's hard drive. With the Raspberry Pi Imager, choose Raspberry Pi OS 64-bit (trixie), set hostname `ML-AI` (or `ML-Pi`), user `admin`, turn SSH on, add your Wi-Fi, and keep "verify" on. Put the card in the Pi and power it up.
+**Before you start:** the AI HAT+ 2 is seated on the Pi, the camera ribbon is in the CSI connector, the USB mic is plugged in, the Pi is on the official 27 W power supply, and you know the Wi-Fi name and password (everything downloads from the internet). See "Hardware".
+
+1. **Flash the SD card.** The SD card is the Pi's hard drive. In the Raspberry Pi Imager pick Raspberry Pi 5, then **Raspberry Pi OS (64-bit)** (the one with a desktop, so you get a terminal; it is Debian 13 "trixie"), then your card. When it asks about customisation, say yes: hostname `ML-AI` (or `ML-Pi`), user `admin` with a password you will remember, your Wi-Fi name and password, and under Services turn SSH on (lets a computer log in later; optional). Keep "verify" on. Put the card in the Pi and power it up; the first boot takes a minute and ends at the desktop.
 2. **Install git.** Git is the tool that downloads and tracks code, the way Google Docs tracks versions of a document. Pi OS usually has it already; this makes sure:
    ```
    sudo apt update && sudo apt install -y git
    ```
    (`sudo` means "do this as the boss of the computer", which is why it asks for the password. `apt` is the Pi's app store for the command line.)
-3. **Pull the repo.** A *repo* (repository) is a project folder kept on GitHub. *Cloning* it copies the whole project, with its history, onto the Pi. This repo is public, so no password or key is needed:
+3. **Pull the repo.** A *repo* (repository) is a project folder kept on GitHub. *Cloning* it copies the whole project, with its history, onto the Pi. This repo is public, so no account, password or key is needed:
    ```
    git clone https://github.com/MarioCruz/ML-AI.git ~/ML-AI
    ```
-   Add `~/ML-AI` at the end so it lands in your home folder with that name.
-
-   Look at what you downloaded: `ls ~/ML-AI`. The code, the install script and this README are all there.
+   The `~/ML-AI` at the end puts it in your home folder (`~` is short for `/home/admin`) under that name. Look at what you downloaded: `ls ~/ML-AI`. The code, the install script and this README are all there.
 4. **Put the files in place.** `~/ML-AI/deploy.sh --local` copies each program from the repo folder to where the Pi runs it from (the voice assistant to `~/voice`, the web page to `~/web`, and so on). A *script* is just a text file of commands the computer runs for you; open it and read it: `less ~/ML-AI/deploy.sh` (press `q` to leave).
-5. **Add the documents** the assistant should know about: copy PDFs, `.txt` or `.md` files into `~/rag/docs/` (USB stick, or `curl -L -o ~/rag/docs/name.pdf <url>`). The install turns them into a searchable index.
-6. **Run the installer.** `~/setup-pi.sh` installs everything else: the Hailo AI chip's driver and software, the speech and voice tools, the AI models, and the four services that start at boot. It takes a while and reboots the Pi twice; after each reboot run `~/setup-pi.sh` again and it carries on where it stopped. Use the wait to read it: `less ~/setup-pi.sh`.
-7. **Try it.** Open http://ml-ai.local/ (or http://ml-pi.local/) on any phone or laptop on the same Wi-Fi, ask a question, then say "hey pi" to the USB microphone. "Test checklist" below shows how to check each part is healthy.
+5. **Add the documents** the assistant should know about (optional, you can do it later): copy PDFs, `.txt` or `.md` files into `~/rag/docs/` (from a USB stick, or `curl -L -o ~/rag/docs/name.pdf <url>`). The installer turns them into a searchable index; with the folder empty it just says so and moves on.
+6. **Run the installer.** `~/setup-pi.sh` installs everything else: the operating system updates, the Hailo AI chip's driver and software, the speech and voice tools, the AI models, and the four services that start at boot. It asks for the `admin` password once. Twice it will stop and print `Reboot now, then run ~/setup-pi.sh again`: type `sudo reboot`, wait for the desktop to come back, open the terminal and run `~/setup-pi.sh` again; it remembers what is done (in `~/.setup-pi.done`) and carries on. Use the waits to read what it is doing: `less ~/setup-pi.sh`. The stages, in order: OS packages (including `tesseract-ocr` and `hailo-models`, not `hailo-h10-all`), kernel command line sanity, HailoRT 5.3.0 from Hailo's download site with the driver patch (see "By hand"), the Python environment with the speech, TTS, embedding and HailoRT packages plus the Vosk and Piper models, the four services, the LLM pulls (about 2 minutes each) and the 3.2 GB vision-language model, and the document index. Stages 1 and 2 are proven; the rest was written from the by-hand steps below and gets its first full run on the next card.
+7. **Try it.** Open http://ml-ai.local/ (or http://ml-pi.local/) on any phone or laptop on the same Wi-Fi, or in the Pi's own browser, and ask a question. Then say "hey pi, what is a Raspberry Pi?" to the USB microphone: the answer appears in the page's transcript (and is spoken aloud once a speaker or HDMI screen with sound is attached). "Test checklist" below shows how to check each part is healthy.
 
-**To update later**, on the Pi: `cd ~/ML-AI && git pull && ./deploy.sh --local`. `git pull` downloads whatever changed on GitHub since you cloned.
+**If something goes wrong:** running `~/setup-pi.sh` again is always safe, it skips what is finished. Read the last lines it printed, then look in "Gotchas" below (power supply and SD card problems are the usual ones). `vcgencmd get_throttled` should print `throttled=0x0`; any other number means the Pi is not getting enough power.
 
-**Things to explore** once it runs: change what the assistant says by editing the wake phrase in `~/ML-AI/pi-config/voice.service`, add your own notes to `~/rag/docs/` and rebuild (see "Answering from documents"), or look at what the camera sees at http://ml-ai.local/. Each of these teaches one idea: configuration files, giving a program new information, and how a computer sees.
+**To update later**, on the Pi: `cd ~/ML-AI && git pull && ./deploy.sh --local`. `git pull` downloads whatever changed on GitHub since you cloned, and `deploy.sh --local` puts the new files in place and restarts the programs.
 
-The script records each finished stage in `~/.setup-pi.done` and stops twice to ask for a reboot (after the OS update if the kernel changed, and after the Hailo driver); after each reboot run `~/setup-pi.sh` again and it continues. Stages: OS packages (including `tesseract-ocr`, `hailo-models`, not `hailo-h10-all`), kernel command line sanity, HailoRT 5.3.0 from Hailo's bucket with the driver patch (below), the Python venv with the speech, TTS, embedding and HailoRT packages plus the Vosk and Piper models, the four services, the LLM pulls (about 2 minutes each at 29 MB/s) and the 3.2 GB VLM file, and the document index. Stages 1 and 2 are proven; the rest was written from the by-hand steps below and gets its first full run on the next card.
+**Things to explore** once it runs: change the wake phrase (`--wake "hey pi"` in `~/ML-AI/pi-config/voice.service`, then `./deploy.sh --local` and the (sudo) unit reinstall from "Updating code"), add your own notes to `~/rag/docs/` and rebuild (see "Answering from documents"), or look at what the camera sees at http://ml-ai.local/. Each of these teaches one idea: configuration files, giving a program new information, and how a computer sees.
 
 ### By hand (what the script does)
 
