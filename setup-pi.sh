@@ -146,6 +146,8 @@ if ! done_ rag; then
   mkdir -p ~/rag/docs
   if ls ~/rag/docs/* >/dev/null 2>&1; then
     for i in 1 2 3; do ~/voice/.venv/bin/python ~/rag/rag.py build && break; echo "   index build failed (try $i of 3), retrying"; sleep 10; done
+    # the page reads the index when it starts; it started in stage 5, before the index existed
+    sudo systemctl restart pi-web
   else
     echo "   no documents yet: copy some into ~/rag/docs/ and run  ~/voice/.venv/bin/python ~/rag/rag.py build"
   fi
