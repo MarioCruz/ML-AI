@@ -49,7 +49,8 @@ if ! done_ apt; then
   # NOT hailo-h10-all / hailo-tappas-core from apt: they bring HailoRT 5.1.1 and TAPPAS 5.1.0;
   # the 5.3.0 versions come from Hailo's bucket in stage 3.
   mark apt
-  newest=$(ls -1 /lib/modules | sort -V | tail -1)
+  # only the Pi 5 flavour (-2712): the image also ships -v8 for the Pi 4, which sorts after it
+  newest=$(ls -1 /lib/modules | grep -- "-2712$" | sort -V | tail -1)
   [ "$newest" = "$(uname -r)" ] || need_reboot "Kernel updated ($(uname -r) -> $newest)"
 fi
 
