@@ -120,7 +120,7 @@ curl -s localhost:8000/api/tags            # what is pulled
 
 ### Working from a computer (optional)
 
-Not required. From a Mac you can do the same without touching the Pi: `ssh-copy-id admin@ml-ai.local`, then in a clone of this repo `./deploy.sh` (copies over SSH and restarts the services), and `ssh -t admin@ml-ai.local ~/setup-pi.sh` to install. Edit on the Mac, `./deploy.sh`; or edit on the Pi in `~/ML-AI`, `./deploy.sh --local`.
+Not required. From a Mac you can do the same without touching the Pi: `ssh-copy-id admin@ml-ai.local`, then in a clone of this repo `./deploy.sh` (copies over SSH and restarts the services), and `ssh -t admin@ml-ai.local './setup-pi.sh'` to install. Edit on the Mac, `./deploy.sh`; or edit on the Pi in `~/ML-AI`, `./deploy.sh --local`.
 
 ### The four services
 
