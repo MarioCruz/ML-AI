@@ -58,7 +58,13 @@ def embedder():
     global _model
     if _model is None:
         from fastembed import TextEmbedding
-        _model = TextEmbedding(MODEL_NAME, cache_dir=MODEL_DIR, threads=EMBED_THREADS)
+        # Local copy first: once the model is in MODEL_DIR (setup-pi.sh stage 4 fetches it)
+        # nothing should depend on Hugging Face answering, which it does not always do from
+        # the Pi. Only a missing model goes online.
+        try:
+            _model = TextEmbedding(MODEL_NAME, cache_dir=MODEL_DIR, threads=EMBED_THREADS, local_files_only=True)
+        except Exception:
+            _model = TextEmbedding(MODEL_NAME, cache_dir=MODEL_DIR, threads=EMBED_THREADS)
     return _model
 
 
