@@ -1,7 +1,8 @@
 #!/bin/bash
 # Fresh-card install of the Pi 5 + AI HAT+ 2 assistant, run ON THE PI as user admin.
 #
-#   On the Mac:   ssh-copy-id admin@ml-ai.local && ./deploy.sh      # copies this script and all project files
+#   Project files: git clone https://github.com/MarioCruz/ML-AI ~/ML-AI && ~/ML-AI/deploy.sh --local   (on the Pi)
+#                  or, from the Mac:  ssh-copy-id admin@ml-ai.local && ./deploy.sh
 #   On the Pi:    ~/setup-pi.sh                                       # asks for the sudo password once
 #
 # It is staged and re-runnable: each finished stage is recorded in ~/.setup-pi.done and
@@ -27,7 +28,7 @@ mark() { echo "$1" >> "$DONE"; }
 need_reboot() { say "$1"; echo "Reboot now, then run ~/setup-pi.sh again:  sudo reboot"; exit 0; }
 
 [ "$(id -un)" = admin ] || { echo "run as user admin"; exit 1; }
-[ -f ~/voice/assistant.py ] && [ -f ~/hailo-ollama.service ] || { echo "project files missing: run ./deploy.sh from the Mac first"; exit 1; }
+[ -f ~/voice/assistant.py ] && [ -f ~/hailo-ollama.service ] || { echo "project files missing: run ~/ML-AI/deploy.sh --local on the Pi (or ./deploy.sh from the Mac) first"; exit 1; }
 touch "$DONE"
 
 say "sudo password (kept alive while the script runs)"

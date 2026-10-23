@@ -3,8 +3,9 @@
 A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the HAT, answers from the FabLab's own documents, speaks with Piper, and watches the room through the Pi camera with YOLO on the same HAT. Everything runs offline on the Pi and starts at boot. The web page at **http://ml-ai.local/** is the front end. This is the base for the Moonlighter FabLab high-school AI program.
 
 - Pi: `admin@ml-ai.local` (mDNS; the DHCP address moves, use the name), hostname `ML-AI`, Raspberry Pi OS 64-bit (Debian 13 trixie), kernel 6.18, Python 3.13, 8 GB RAM, 32 GB SD (a 64 GB card is on order).
+- There is a second Pi, a copy, named `ml-pi` (`admin@ml-pi.local`). Everything here applies to it too: put its name where `ml-ai.local` appears, and on the Pi itself use `deploy.sh --local`, which needs no name. Each Pi has its own SSH host key, so the first `ssh` to a new one asks you to accept it.
 - HailoRT, firmware, model zoo and TAPPAS all **5.3.0** (since Oct 19, 2026).
-- Passwordless sudo is **not** set up. Steps marked **(sudo)** run in an interactive terminal: `ssh -t admin@ml-ai.local 'sudo ...'` prompts for the password. Everything else can be done from the Mac with `./deploy.sh`.
+- Passwordless sudo is **not** set up. Steps marked **(sudo)** run in an interactive terminal: `ssh -t admin@ml-ai.local 'sudo ...'` prompts for the password. Everything else can be done from the Mac with `./deploy.sh`, or on the Pi itself with `~/ML-AI/deploy.sh --local` (below).
 - **Power:** the Pi currently runs on a Mac USB-C charger, which only gives 3 A at 5 V. Under full load it browns out (see Gotchas). The official 27 W / 5 A supply is on order.
 
 ## What is in this repo
@@ -12,7 +13,7 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 | Path | Goes to (on the Pi) | What it is |
 |---|---|---|
 | `setup-pi.sh` | `~/` | From-scratch installer for a new SD card (staged, re-runnable, two reboots) |
-| `deploy.sh` | — | Copies everything below to the Pi and restarts the services that need it (no sudo) |
+| `deploy.sh` | — | Copies everything below to its place on the Pi and restarts the services that need it (no sudo). Run it from the Mac (`./deploy.sh`) or on the Pi from the clone (`./deploy.sh --local`) |
 | `voice/assistant.py` | `~/voice/` | Voice assistant: USB mic → Vosk → LLM on the HAT (+ documents, camera) → Piper |
 | `voice/stt_fix.py` | `~/voice/` | Vocabulary corrections for every transcript ("pie"→"pi", "i had"→"ai hat", ...) |
 | `voice/stt_bench.py`, `voice/llm_bench.py` | `~/voice/` | Speech-recognition and LLM benchmarks (see History) |
@@ -38,8 +39,11 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 ### The short way (new SD card)
 
 1. Flash Raspberry Pi OS 64-bit (trixie) with the Imager: hostname `ML-AI`, user `admin`, SSH on, your Wi-Fi, and keep "verify" on.
-2. From the Mac: `ssh-copy-id admin@ml-ai.local && ./deploy.sh`, then copy the documents: `scp *.pdf admin@ml-ai.local:~/rag/docs/`.
-3. On the Pi: `ssh -t admin@ml-ai.local ~/setup-pi.sh`. It asks for the sudo password once and keeps it alive.
+2. Get the project onto the Pi, either way:
+   - **From the Pi (no Mac needed).** The repo is private, so the Pi needs read access once: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub`, paste that line at github.com/MarioCruz/ML-AI → Settings → Deploy keys (leave "write access" off), then `git clone git@github.com:MarioCruz/ML-AI.git ~/ML-AI && ~/ML-AI/deploy.sh --local`. (A personal access token over HTTPS also works: `git clone https://github.com/MarioCruz/ML-AI.git` and give the token as the password.)
+   - **From the Mac.** `ssh-copy-id admin@ml-ai.local && ./deploy.sh`.
+3. Copy the documents into `~/rag/docs/` (from the Mac: `scp *.pdf admin@ml-ai.local:~/rag/docs/`; on the Pi, copy them from a USB stick or download them).
+4. On the Pi: `~/setup-pi.sh` (or from the Mac: `ssh -t admin@ml-ai.local ~/setup-pi.sh`). It asks for the sudo password once and keeps it alive.
 
 The script records each finished stage in `~/.setup-pi.done` and stops twice to ask for a reboot (after the OS update if the kernel changed, and after the Hailo driver); run the same line again after each reboot and it continues. Stages: OS packages (including `tesseract-ocr`, `hailo-models`, not `hailo-h10-all`), kernel command line sanity, HailoRT 5.3.0 from Hailo's bucket with the driver patch (below), the Python venv with the speech, TTS, embedding and HailoRT packages plus the Vosk and Piper models, the four services, the LLM pulls (about 2 minutes each at 29 MB/s) and the 3.2 GB VLM file, and the document index. Stages 1 and 2 are proven; the rest was written from the by-hand steps below and gets its first full run on the next card.
 
@@ -94,7 +98,7 @@ curl -s localhost:8000/api/tags            # what is pulled
 
 ### Updating code
 
-Edit in this repo, then `./deploy.sh`. It copies the files and kills the running `pi-web`, `voice` and `hailo-live` processes; their units have `Restart=always`, so systemd starts them again with the new code, no sudo needed. Changing a unit file still needs `sudo cp ... /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart <unit>`.
+**On the Pi:** `cd ~/ML-AI && git pull && ./deploy.sh --local`. **From the Mac:** edit in this repo, then `./deploy.sh`. Either way the script copies the files and kills the running `pi-web`, `voice` and `hailo-live` processes; their units have `Restart=always`, so systemd starts them again with the new code, no sudo needed. Changing a unit file still needs `sudo cp ... /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart <unit>`.
 
 ## Running
 
