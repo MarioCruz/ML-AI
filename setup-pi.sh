@@ -127,7 +127,8 @@ if ! done_ models; then
   done
   curl -s http://127.0.0.1:8000/api/tags | python3 -c 'import json,sys; print("pulled:", [m["name"] for m in json.load(sys.stdin)["models"]])'
   say "   Qwen2-VL-2B for vlm_test.py (3.2 GB)"
-  [ -s "$HAILO_DIR/Qwen2-VL-2B-Instruct.hef" ] || curl -fL --progress-bar -C - -o "$HAILO_DIR/Qwen2-VL-2B-Instruct.hef" "$HEF_URL/Qwen2-VL-2B-Instruct.hef"
+  # download to .part and rename at the end, so an interrupted download is resumed next run, not mistaken for done
+  [ -s "$HAILO_DIR/Qwen2-VL-2B-Instruct.hef" ] || { curl -fL --progress-bar -C - -o "$HAILO_DIR/Qwen2-VL-2B-Instruct.hef.part" "$HEF_URL/Qwen2-VL-2B-Instruct.hef" && mv "$HAILO_DIR/Qwen2-VL-2B-Instruct.hef.part" "$HAILO_DIR/Qwen2-VL-2B-Instruct.hef"; }
   mark models
 fi
 
