@@ -1,6 +1,6 @@
 # Raspberry Pi 5 + AI HAT+ 2 voice assistant (ML-AI)
 
-A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the HAT, answers from the FabLab's own documents, speaks with Piper, and watches the room through the Pi camera with YOLO on the same HAT. Everything runs offline on the Pi and starts at boot. The web page at **http://ml-ai.local/** is the front end. This is the base for the Moonlighter FabLab high-school AI program.
+A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the HAT, answers from the Maker Space's own documents, speaks with Piper, and watches the room through the Pi camera with YOLO on the same HAT. Everything runs offline on the Pi and starts at boot. The web page at **http://ml-ai.local/** is the front end. This is the base for the AI program at **Moonlighter Maker Space in Miami, Florida**, where students learn about AI and computing by building and running it themselves.
 
 - Pi: `admin@ml-ai.local` (mDNS; the DHCP address moves, use the name), hostname `ML-AI`, Raspberry Pi OS 64-bit (Debian 13 trixie), kernel 6.18, Python 3.13, 8 GB RAM, 32 GB SD (a 64 GB card is on order).
 - There is a second Pi, a copy, named `ml-pi` (`admin@ml-pi.local`). Everything here applies to it too; its page is http://ml-pi.local/.
@@ -47,9 +47,11 @@ Written for students: every step says what it does and why, so you learn how a c
    sudo apt update && sudo apt install -y git
    ```
    (`sudo` means "do this as the boss of the computer", which is why it asks for the password. `apt` is the Pi's app store for the command line.)
-3. **Pull the repo.** A *repo* (repository) is a project folder kept on GitHub. *Cloning* it copies the whole project, with its history, onto the Pi. This repo is private, so the Pi must prove it is allowed to read it. Pick one:
-   - *Deploy key (a key the Pi keeps, like a house key).* On the Pi: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub`. That prints the Pi's **public** key. On GitHub open this repo → Settings → Deploy keys → Add deploy key (a phone browser is fine), paste the line, leave "write access" off. Back on the Pi: `git clone git@github.com:MarioCruz/ML-AI.git ~/ML-AI` (answer `yes` when it asks about GitHub's fingerprint).
-   - *Personal access token (a long password for one purpose).* Create a fine-grained token with read access to this repo at github.com/settings/tokens, then `git clone https://github.com/MarioCruz/ML-AI.git ~/ML-AI`; give your GitHub user name and, as the password, the token.
+3. **Pull the repo.** A *repo* (repository) is a project folder kept on GitHub. *Cloning* it copies the whole project, with its history, onto the Pi. This repo is public, so no password or key is needed:
+   ```
+   git clone https://github.com/MarioCruz/ML-AI.git ~/ML-AI
+   ```
+   Add `~/ML-AI` at the end so it lands in your home folder with that name.
 
    Look at what you downloaded: `ls ~/ML-AI`. The code, the install script and this README are all there.
 4. **Put the files in place.** `~/ML-AI/deploy.sh --local` copies each program from the repo folder to where the Pi runs it from (the voice assistant to `~/voice`, the web page to `~/web`, and so on). A *script* is just a text file of commands the computer runs for you; open it and read it: `less ~/ML-AI/deploy.sh` (press `q` to leave).
@@ -252,7 +254,7 @@ Then open http://ml-ai.local/, ask "How do I load filament into the AMS?" (sourc
 
 Two different things, with very different answers.
 
-**Knowledge (the LLM): use the documents, not training.** Nothing can be trained or fine-tuned for the HAT: only Hailo's precompiled models run on it and Hailo publishes no tool to compile an LLM. What the assistant knows about the FabLab's equipment comes from `~/rag/docs/`: manuals, lesson notes, a markdown file of house rules. Copy files in, run `~/voice/.venv/bin/python ~/rag/rag.py build`, and it answers from them with page citations. Students can do this without sudo.
+**Knowledge (the LLM): use the documents, not training.** Nothing can be trained or fine-tuned for the HAT: only Hailo's precompiled models run on it and Hailo publishes no tool to compile an LLM. What the assistant knows about the Maker Space's equipment comes from `~/rag/docs/`: manuals, lesson notes, a markdown file of house rules. Copy files in, run `~/voice/.venv/bin/python ~/rag/rag.py build`, and it answers from them with page citations. Students can do this without sudo.
 
 **Recognising the equipment (the camera): a custom YOLO, compiled for the Hailo-10H.** The detector knows the 80 COCO classes (person, cup, laptop ...), not "H2D printer" or "xTool". Training your own detector is a real project, roughly a weekend for someone comfortable with Python; the compile step is where people get stuck.
 
@@ -279,5 +281,5 @@ Sources: [custom HEF with DFC and model zoo](https://community.hailo.ai/t/creati
 - [Hailo GenAI model zoo](https://github.com/hailo-ai/hailo_model_zoo_genai) — models, hailo-ollama usage, changelog; [Hailo community forum](https://community.hailo.ai) for the 5.3.0 driver patch and sharing threads
 - [raspberrypi/linux #7230](https://github.com/raspberrypi/linux/issues/7230) — the `cma=` firmware mailbox bug
 - [pi-private-ai-server](https://github.com/btstevens1984az/pi-private-ai-server) — reference for `hailo-ollama`, the systemd unit and the RAG approach
-- [Pi AI Guide (Moonlighter FabLab)](https://aimoonlighter.howto.rocks) — the program this is built for, repo at github.com/EmilMoonlighter/AI-Program
+- [Pi AI Guide (Moonlighter Maker Space)](https://aimoonlighter.howto.rocks) — the program this is built for, repo at github.com/EmilMoonlighter/AI-Program
 - [Vosk models](https://alphacephei.com/vosk/models), [Piper voices](https://github.com/rhasspy/piper), [fastembed](https://github.com/qdrant/fastembed)
