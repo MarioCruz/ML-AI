@@ -104,11 +104,12 @@ if ! done_ venv; then
   if [ ! -f ~/voice/piper/$PIPER_VOICE.onnx ]; then
     mkdir -p ~/voice/piper && cd ~/voice/piper && ~/voice/.venv/bin/python -m piper.download_voices $PIPER_VOICE
   fi
-  # the sentence-embedding model for the document index (65 MB from Hugging Face). fastembed
-  # gives up after one failed download and the HF CDN is sometimes unreachable, so try a few times here
-  # rather than letting stage 7 fail on it.
+  # the sentence-embedding model for the document index (65 MB from Hugging Face), into the folder
+  # rag.py loads it from (MODEL_DIR). The HF API answers with errors now and then and fastembed gives
+  # up quickly, so try a few times here rather than letting stage 7 fail on it.
+  mkdir -p ~/rag/models
   for i in 1 2 3 4 5; do
-    ~/voice/.venv/bin/python -c 'from fastembed import TextEmbedding; TextEmbedding("BAAI/bge-small-en-v1.5", threads=1)' 2>/dev/null && break
+    ~/voice/.venv/bin/python -c 'from fastembed import TextEmbedding; TextEmbedding("BAAI/bge-small-en-v1.5", cache_dir="/home/admin/rag/models", threads=1)' 2>/dev/null && break
     echo "   embedding model download failed (try $i of 5), retrying in 20 s"; sleep 20
   done
   mark venv
