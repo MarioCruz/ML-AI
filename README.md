@@ -3,9 +3,10 @@
 A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the HAT, answers from the FabLab's own documents, speaks with Piper, and watches the room through the Pi camera with YOLO on the same HAT. Everything runs offline on the Pi and starts at boot. The web page at **http://ml-ai.local/** is the front end. This is the base for the Moonlighter FabLab high-school AI program.
 
 - Pi: `admin@ml-ai.local` (mDNS; the DHCP address moves, use the name), hostname `ML-AI`, Raspberry Pi OS 64-bit (Debian 13 trixie), kernel 6.18, Python 3.13, 8 GB RAM, 32 GB SD (a 64 GB card is on order).
-- There is a second Pi, a copy, named `ml-pi` (`admin@ml-pi.local`). Everything here applies to it too: put its name where `ml-ai.local` appears, and on the Pi itself use `deploy.sh --local`, which needs no name. Each Pi has its own SSH host key, so the first `ssh` to a new one asks you to accept it.
+- There is a second Pi, a copy, named `ml-pi` (`admin@ml-pi.local`). Everything here applies to it too; its page is http://ml-pi.local/.
+- **Everything runs from the Pi itself, no computer needed.** Plug in a keyboard and screen (or open a terminal on the Pi any other way), then follow "Quick start" below: it downloads this repo from GitHub onto the Pi and installs and updates from there. A Mac is optional (see "Working from a computer").
 - HailoRT, firmware, model zoo and TAPPAS all **5.3.0** (since Oct 19, 2026).
-- Passwordless sudo is **not** set up. Steps marked **(sudo)** run in an interactive terminal: `ssh -t admin@ml-ai.local 'sudo ...'` prompts for the password. Everything else can be done from the Mac with `./deploy.sh`, or on the Pi itself with `~/ML-AI/deploy.sh --local` (below).
+- Passwordless sudo is **not** set up. Steps marked **(sudo)** need the `admin` password, which the Pi asks for when you run `sudo ...` in its terminal. (From a computer: `ssh -t admin@ml-ai.local 'sudo ...'`.)
 - **Power:** the Pi currently runs on a Mac USB-C charger, which only gives 3 A at 5 V. Under full load it browns out (see Gotchas). The official 27 W / 5 A supply is on order.
 
 ## What is in this repo
@@ -36,16 +37,19 @@ A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answer
 
 ## Install
 
-### The short way (new SD card)
+### Quick start (on the Pi, no computer needed)
 
-1. Flash Raspberry Pi OS 64-bit (trixie) with the Imager: hostname `ML-AI`, user `admin`, SSH on, your Wi-Fi, and keep "verify" on.
-2. Get the project onto the Pi, either way:
-   - **From the Pi (no Mac needed).** The repo is private, so the Pi needs read access once: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub`, paste that line at github.com/MarioCruz/ML-AI → Settings → Deploy keys (leave "write access" off), then `git clone git@github.com:MarioCruz/ML-AI.git ~/ML-AI && ~/ML-AI/deploy.sh --local`. (A personal access token over HTTPS also works: `git clone https://github.com/MarioCruz/ML-AI.git` and give the token as the password.)
-   - **From the Mac.** `ssh-copy-id admin@ml-ai.local && ./deploy.sh`.
-3. Copy the documents into `~/rag/docs/` (from the Mac: `scp *.pdf admin@ml-ai.local:~/rag/docs/`; on the Pi, copy them from a USB stick or download them).
-4. On the Pi: `~/setup-pi.sh` (or from the Mac: `ssh -t admin@ml-ai.local ~/setup-pi.sh`). It asks for the sudo password once and keeps it alive.
+1. Flash Raspberry Pi OS 64-bit (trixie) with the Imager: hostname `ML-AI` (or `ML-Pi`), user `admin`, SSH on, your Wi-Fi, and keep "verify" on. Boot the Pi and open a terminal on it.
+2. **Download this repo from GitHub.** The repo is private, so the Pi needs read access once. Pick one:
+   - *Deploy key (best for a Pi that stays put).* On the Pi: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub`. Open github.com/MarioCruz/ML-AI → Settings → Deploy keys → Add deploy key (a phone browser is fine), paste the line, leave "write access" off. Then: `git clone git@github.com:MarioCruz/ML-AI.git ~/ML-AI` (answer `yes` to the GitHub host question).
+   - *Personal access token.* Create a fine-grained token with read access to this repo at github.com/settings/tokens, then `git clone https://github.com/MarioCruz/ML-AI.git ~/ML-AI` and give your GitHub user name and the token as the password.
+3. **Put the files in place:** `~/ML-AI/deploy.sh --local`.
+4. **Documents:** copy your PDFs, `.txt` or `.md` files into `~/rag/docs/` (USB stick, or `curl -L -o ~/rag/docs/name.pdf <url>`). The install builds the index from them.
+5. **Install everything:** `~/setup-pi.sh`. It asks for the `admin` password once and keeps it alive.
 
-The script records each finished stage in `~/.setup-pi.done` and stops twice to ask for a reboot (after the OS update if the kernel changed, and after the Hailo driver); run the same line again after each reboot and it continues. Stages: OS packages (including `tesseract-ocr`, `hailo-models`, not `hailo-h10-all`), kernel command line sanity, HailoRT 5.3.0 from Hailo's bucket with the driver patch (below), the Python venv with the speech, TTS, embedding and HailoRT packages plus the Vosk and Piper models, the four services, the LLM pulls (about 2 minutes each at 29 MB/s) and the 3.2 GB VLM file, and the document index. Stages 1 and 2 are proven; the rest was written from the by-hand steps below and gets its first full run on the next card.
+**To update later**, on the Pi: `cd ~/ML-AI && git pull && ./deploy.sh --local`.
+
+The script records each finished stage in `~/.setup-pi.done` and stops twice to ask for a reboot (after the OS update if the kernel changed, and after the Hailo driver); after each reboot run `~/setup-pi.sh` again and it continues. Stages: OS packages (including `tesseract-ocr`, `hailo-models`, not `hailo-h10-all`), kernel command line sanity, HailoRT 5.3.0 from Hailo's bucket with the driver patch (below), the Python venv with the speech, TTS, embedding and HailoRT packages plus the Vosk and Piper models, the four services, the LLM pulls (about 2 minutes each at 29 MB/s) and the 3.2 GB VLM file, and the document index. Stages 1 and 2 are proven; the rest was written from the by-hand steps below and gets its first full run on the next card.
 
 ### By hand (what the script does)
 
@@ -98,9 +102,11 @@ curl -s localhost:8000/api/tags            # what is pulled
 
 ### Updating code
 
-**On the Pi:** `cd ~/ML-AI && git pull && ./deploy.sh --local`. **From the Mac:** edit in this repo, then `./deploy.sh`. Either way the script copies the files and kills the running `pi-web`, `voice` and `hailo-live` processes; their units have `Restart=always`, so systemd starts them again with the new code, no sudo needed. Changing a unit file still needs `sudo cp ... /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart <unit>`.
+**On the Pi:** `cd ~/ML-AI && git pull && ./deploy.sh --local`. The script copies the files and kills the running `pi-web`, `voice` and `hailo-live` processes; their units have `Restart=always`, so systemd starts them again with the new code, no sudo needed. Changing a unit file still needs `sudo cp ... /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart <unit>`.
 
-## Running
+### Working from a computer (optional)
+
+Not required. From a Mac you can do the same without touching the Pi: `ssh-copy-id admin@ml-ai.local`, then in a clone of this repo `./deploy.sh` (copies over SSH and restarts the services), and `ssh -t admin@ml-ai.local ~/setup-pi.sh` to install. Edit on the Mac, `./deploy.sh`; or edit on the Pi in `~/ML-AI`, `./deploy.sh --local`.
 
 ### The four services
 
@@ -153,10 +159,10 @@ Current index: 360 chunks from 5 documents (Bambu Lab H2D 3D Printing User Manua
 `hailo-ollama` serves text LLMs only; the VLM runs through the HailoRT Python GenAI API, and only one generative model can be loaded on the HAT, so the LLM must be stopped first:
 
 ```
-ssh -t admin@ml-ai.local 'sudo systemctl stop hailo-ollama'                                   # (sudo)
+sudo systemctl stop hailo-ollama                                                              # (sudo)
 ~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --image photo.jpg --prompt "Describe this image in two sentences."
 ~/voice/.venv/bin/python ~/hailo_test/vlm_test.py --camera --max-tokens 80                    # stop hailo-live first
-ssh -t admin@ml-ai.local 'sudo systemctl start hailo-ollama'                                  # (sudo)
+sudo systemctl start hailo-ollama                                                             # (sudo)
 ```
 
 About 7 tok/s including the image prefill; 8 s to load warm, 33 s cold from the SD card. It recognises open-vocabulary things ("a 3D printer") that YOLO cannot. It ignores sentence limits in the prompt, so bound answers with `--max-tokens`.
@@ -241,7 +247,7 @@ Two different things, with very different answers.
 1. **Photos and labels.** A few hundred photos of each machine from different angles, distances and lighting, with boxes drawn around them. [Roboflow](https://roboflow.com) is the usual tool and exports straight to YOLO format. This is the students' part.
 2. **Train.** YOLOv8n/s or YOLO11n/s with [Ultralytics](https://docs.ultralytics.com) on the Mac (an hour or two for a small model) or free on Google Colab. Not on the Pi. Small models only: the HAT runs `yolov11m` at 15 fps now; a nano/small model is faster and easier to compile.
 3. **Compile to a HEF.** The awkward step. Hailo's Dataflow Compiler (DFC) is x86-64 Linux only, downloaded from the [Developer Zone](https://hailo.ai/developer-zone/), and the Hailo-10H needs its own DFC package, not the common Hailo-8 one (the Hailo-8 CLI rejects `--hw-arch hailo10h`). It needs a Linux PC, a cloud VM or an x86 Docker container, not the Mac; a calibration set of a few hundred representative images (Ultralytics recommends ~1,000 for production accuracy; INT8 only); and a DFC version that matches the HailoRT on the Pi (5.3.0: a HEF compiled for another version fails with `HAILO_NOT_IMPLEMENTED`). The community pattern is `hailomz compile yolov8s --hw-arch hailo10h --ckpt model.onnx --calib-path calib/ --yaml yolov8s.yaml --classes N`. Ultralytics 8.4.97 reportedly added direct Hailo-10H HEF export (`yolo export format=hailo`), unverified here, and still x86.
-4. **Deploy.** `scp model.hef admin@ml-ai.local:~/hailo-live/` then in `hailo-live/live_yolo.py` set `HEF` to it and replace the `COCO` tuple with your class names in training order; `./deploy.sh` and the service picks it up. The NMS runs on the chip, so the output format does not change. Test first with `live_yolo.py --image photo.jpg --out out.jpg`.
+4. **Deploy.** Get `model.hef` onto the Pi into `~/hailo-live/` (USB stick, or `scp` from the machine you compiled on), then in `hailo-live/live_yolo.py` set `HEF` to it and replace the `COCO` tuple with your class names in training order; `./deploy.sh --local` (after committing the change to the repo, or edit the copy in `~/hailo-live/` directly) and the service picks it up. The NMS runs on the chip, so the output format does not change. Test first with `live_yolo.py --image photo.jpg --out out.jpg`.
 
 **The shortcut that needs no training:** the vision-language model (`vlm_test.py`) already recognises "a 3D printer" or "a laser cutter" from a camera frame because it understands open vocabulary. It cannot run while the chat LLM is loaded, so it is a demo, not a live feature.
 

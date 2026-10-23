@@ -28,6 +28,7 @@ mark() { echo "$1" >> "$DONE"; }
 need_reboot() { say "$1"; echo "Reboot now, then run ~/setup-pi.sh again:  sudo reboot"; exit 0; }
 
 [ "$(id -un)" = admin ] || { echo "run as user admin"; exit 1; }
+[ -f ~/voice/assistant.py ] || { [ -x ~/ML-AI/deploy.sh ] && ~/ML-AI/deploy.sh --local; }
 [ -f ~/voice/assistant.py ] && [ -f ~/hailo-ollama.service ] || { echo "project files missing: run ~/ML-AI/deploy.sh --local on the Pi (or ./deploy.sh from the Mac) first"; exit 1; }
 touch "$DONE"
 
