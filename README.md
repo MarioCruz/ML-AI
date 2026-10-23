@@ -1,6 +1,6 @@
 # Raspberry Pi 5 + AI HAT+ 2 voice assistant (ML-AI)
 
-A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the HAT, answers from the Maker Space's own documents, speaks with Piper, and watches the room through the Pi camera with YOLO on the same HAT. Everything runs offline on the Pi and starts at boot. The web page at **http://ml-ai.local/** is the front end. This is the base for the AI program at **Moonlighter Maker Space in Miami, Florida**, where students learn about AI and computing by building and running it themselves.
+A Raspberry Pi 5 with an AI HAT+ 2 (Hailo-10H) that listens on a USB mic, answers with a local LLM running on the HAT, answers from the FabLab's own documents, speaks with Piper, and watches the room through the Pi camera with YOLO on the same HAT. Everything runs offline on the Pi and starts at boot. The web page at **http://ml-ai.local/** is the front end. This is the base for the AI program at **Moonlighter FabLab in Miami, Florida**, where students learn about AI and computing by building and running it themselves.
 
 - Pi: `admin@ml-ai.local` (mDNS; the DHCP address moves, use the name), hostname `ML-AI`, Raspberry Pi OS 64-bit (Debian 13 trixie), kernel 6.18, Python 3.13, 8 GB RAM, 32 GB SD (a 64 GB card is on order).
 - There is a second Pi, a copy, named `ml-pi` (`admin@ml-pi.local`). Everything here applies to it too; its page is http://ml-pi.local/.
@@ -254,7 +254,7 @@ Then open http://ml-ai.local/, ask "How do I load filament into the AMS?" (sourc
 
 Two different things, with very different answers.
 
-**Knowledge (the LLM): use the documents, not training.** Nothing can be trained or fine-tuned for the HAT: only Hailo's precompiled models run on it and Hailo publishes no tool to compile an LLM. What the assistant knows about the Maker Space's equipment comes from `~/rag/docs/`: manuals, lesson notes, a markdown file of house rules. Copy files in, run `~/voice/.venv/bin/python ~/rag/rag.py build`, and it answers from them with page citations. Students can do this without sudo.
+**Knowledge (the LLM): use the documents, not training.** Nothing can be trained or fine-tuned for the HAT: only Hailo's precompiled models run on it and Hailo publishes no tool to compile an LLM. What the assistant knows about the FabLab's equipment comes from `~/rag/docs/`: manuals, lesson notes, a markdown file of house rules. Copy files in, run `~/voice/.venv/bin/python ~/rag/rag.py build`, and it answers from them with page citations. Students can do this without sudo.
 
 **Recognising the equipment (the camera): a custom YOLO, compiled for the Hailo-10H.** The detector knows the 80 COCO classes (person, cup, laptop ...), not "H2D printer" or "xTool". Training your own detector is a real project, roughly a weekend for someone comfortable with Python; the compile step is where people get stuck.
 
@@ -281,5 +281,5 @@ Sources: [custom HEF with DFC and model zoo](https://community.hailo.ai/t/creati
 - [Hailo GenAI model zoo](https://github.com/hailo-ai/hailo_model_zoo_genai) — models, hailo-ollama usage, changelog; [Hailo community forum](https://community.hailo.ai) for the 5.3.0 driver patch and sharing threads
 - [raspberrypi/linux #7230](https://github.com/raspberrypi/linux/issues/7230) — the `cma=` firmware mailbox bug
 - [pi-private-ai-server](https://github.com/btstevens1984az/pi-private-ai-server) — reference for `hailo-ollama`, the systemd unit and the RAG approach
-- [Pi AI Guide (Moonlighter Maker Space)](https://aimoonlighter.howto.rocks) — the program this is built for, repo at github.com/EmilMoonlighter/AI-Program
+- [Pi AI Guide (Moonlighter FabLab)](https://aimoonlighter.howto.rocks) — the program this is built for, repo at github.com/EmilMoonlighter/AI-Program
 - [Vosk models](https://alphacephei.com/vosk/models), [Piper voices](https://github.com/rhasspy/piper), [fastembed](https://github.com/qdrant/fastembed)
